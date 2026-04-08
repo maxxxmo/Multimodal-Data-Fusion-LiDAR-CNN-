@@ -1,0 +1,35 @@
+# Environnements virtuels
+venv/
+.venv/
+env/
+bin/
+include/
+lib/
+share/
+
+# Python cache (évite les fichiers .pyc)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pt
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# Données (souvent trop lourdes pour Git)
+data/
+*.csv
+*.parquet
+*.jsonl
+
+# Variables d'environnement (secrets, clés API)
+.env
+
+# IDE
+.vscode/
+.idea/
+
+*.pt
+*.pth
+*.bin
+*.onnx
