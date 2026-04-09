@@ -28,6 +28,7 @@ To use this repo you need:
 ...
 
 # Dataset Handling and calibration
+The dataset is composed of a tracking sub dataset, a velodyne dataset and videos to test the results.
 I did select 3 videos:
 ![alt text](images/dataset.png)
 Velodyn (named velo sometimes) refers to the LiDAR. I will use frames from camera 2 as it's the colored version.
@@ -59,7 +60,7 @@ In the calibration file, there are times where matrix has a 1 line added. its fo
 Then we filter the data to keep only what's in front of the LiDAR sensor.
 
 # Late fusion approach
-
+First we create a YOLO type Dataset using the tracking part of the dataset
 ## 1. CNN
 
 ## 2. LiDAR
