@@ -28,6 +28,8 @@ To use this repo you need:
 ...
 
 # Dataset Handling and calibration
+I did select 3 videos:
+![alt text](images/dataset.png)
 Velodyn (named velo sometimes) refers to the LiDAR. I will use frames from camera 2 as it's the colored version.
 
 ![Sensor Setup](images/sensor_setup.png)
@@ -54,8 +56,7 @@ We have :
 
 In the calibration file, there are times where matrix has a 1 line added. its for doing the translation. The explanation are in the link.
 
-## Data Filtering 
-(only keep whats in front of us)/ Pourquoi et comment on retire les points derrière la caméra (x<0).
+Then we filter the data to keep only what's in front of the LiDAR sensor.
 
 # Late fusion approach
 
