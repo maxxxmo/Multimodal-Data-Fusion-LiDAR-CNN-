@@ -1,0 +1,20 @@
+train_params:
+  imgsz: [384, 1280] # so 2^n to optimize training speed
+  workers: 8          
+  batch: -1          
+  epochs: 2
+  optimizer: "AdamW"
+  lr0: 0.001          
+  weight_decay: 0.01  
+  patience: 10        
+  save: True          
+  cache: True   
+  exist_ok: True
+  rect: True # aspect ratio training
+
+
+
+experiment_name: "multimodal_detector"
+run_name: "First Tests"
+model_variant: "yolov8n.pt"
+data_path: "./kitti.yaml"

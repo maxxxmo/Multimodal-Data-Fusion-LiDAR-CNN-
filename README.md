@@ -29,14 +29,22 @@ To use this repo you need:
 
 # Dataset Handling and calibration
 The dataset is composed of a tracking sub dataset, a velodyne dataset and videos to test the results.
-I did select 3 videos:
-![alt text](images/dataset.png)
+<!-- I did select 3 videos:
+![alt text](images/dataset.png) -->
 Velodyn (named velo sometimes) refers to the LiDAR. I will use frames from camera 2 as it's the colored version.
 
 ![Sensor Setup](images/sensor_setup.png)
 ## Coordinate system
 From the paper we know:
 ![cord system](images/cord_system.png)
+
+and labels are:
+
+61 3 Car 1 0 -2.101562 858.090004 200.535261 1241.000000 374.000000 1.377451 1.491847 3.318948 3.256830 1.648443 5.626493 -1.600523
+
+for
+
+Frame_ID Track_ID Type Truncated Occluded Alpha bbox_left bbox_top bbox_right bbox_bottom Height Width Length Location_X Location_Y Location_Z Rotation_y
 ## Projection pipeline
 
 The LiDAR sensor and Camera 2 don't have the same position. The Kittit Dataset contain the data to project the LiDAR results on the camera referential.
@@ -62,6 +70,11 @@ Then we filter the data to keep only what's in front of the LiDAR sensor.
 # Late fusion approach
 First we create a YOLO type Dataset using the tracking part of the dataset
 ## 1. CNN
+### First Training
+![Confusion](images/confusion_matrix_normalized.png)
+![results](images/results.png)
+
+TO DO improve the model...
 
 ## 2. LiDAR
 
@@ -76,6 +89,14 @@ First we create a YOLO type Dataset using the tracking part of the dataset
 - [KITTI Coordinate Transformations](https://medium.com/data-science/kitti-coordinate-transformations-125094cd42fb)
 - [Vision meets Robotics: The KITTI Dataset](https://www.cvlibs.net/publications/Geiger2013IJRR.pdf)
 - [Camera-Lidar Projection: Navigating between 2D and 3D](https://medium.com/swlh/camera-lidar-projection-navigating-between-2d-and-3d-911c78167a94)
+
+- @article{Zhou2018,
+   author  = {Qian-Yi Zhou and Jaesik Park and Vladlen Koltun},
+   title   = {{Open3D}: {A} Modern Library for {3D} Data Processing},
+   journal = {arXiv:1801.09847},
+   year    = {2018},
+}
+
 
 ## Data Sources
 
