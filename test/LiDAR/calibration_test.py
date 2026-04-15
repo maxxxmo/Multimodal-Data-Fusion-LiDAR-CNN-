@@ -18,31 +18,35 @@ h, w, _ = img.shape
 scan = np.fromfile(velo_path, dtype=np.float32).reshape(-1, 4)
 points_3d = scan[:, :3]
 
+# Visualization
+plt.figure(figsize=(10, 5))
+plt.subplot(1, 2, 1)
+plt.imshow(img)
+plt.scatter(points_3d[:, 0], points_3d[:, 1], s=1, c='red')
+plt.title('LiDAR points in image coordinates')
+
 # Calibration loading
 calib = KittiCalibration(calib_dir)
 
 # Only Calibration for training our detector (Warning the order is IMPORTANT)
 ## Filtering
-mask_physical = calib.filter_front_velo(points_3d) & calib.filter_ground_simple(points_3d)
-points_3d_filtered = points_3d[mask_physical]
+
 ## Transormation
-points_rect = calib.transform_velo_to_rect(points_3d_filtered)
-
-####
-#Detection system for the fusion
-####
-
-
-# Projection for the points detected by our detection system for the fusion
-
-pixels = calib.project_rect_to_image(points_rect) #Projection of 3D points to 2D image plane the result is in px
-mask_visible = calib.filter_points_on_image(points_3d_filtered, pixels, (h, w)) # On LiDAR points we create a mask for pixel inside the created image size
-pixels_filtered = pixels[mask_visible] # we use the created mask from lidar data on the pixel projection
-
+points_rect = calib.transform_velo_to_rect(points_3d)
 
 # Visualization
 plt.figure(figsize=(10, 5))
 plt.subplot(1, 2, 1)
 plt.imshow(img)
-plt.scatter(pixels_filtered[:, 0], pixels_filtered[:, 1], s=1, c='red')
+plt.scatter(points_rect[:, 0], points_rect[:, 1], s=1, c='red')
+plt.title('LiDAR points in image coordinates')
+
+# Projection for the points detected by our detection system for the fusion
+pixels = calib.project_rect_to_image(points_rect) #Projection of 3D points to 2D image plane the result is in px
+
+# Visualization
+plt.figure(figsize=(10, 5))
+plt.subplot(1, 2, 1)
+plt.imshow(img)
+plt.scatter(pixels[:, 0], pixels[:, 1], s=1, c='red')
 plt.title('LiDAR points projected on image')

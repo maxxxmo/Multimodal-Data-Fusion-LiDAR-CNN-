@@ -86,27 +86,3 @@ class KittiCalibration:
         inv_T_rect = np.linalg.inv(self.T_rect)
         points_velo = points_homo @ inv_T_rect.T
         return points_velo[:, :3]
-    
-    # def filter_points_on_image(self, points_3d, pixels, img_shape):
-    #     """Keep only points that are visible in the image. To keep alignement between sensors
-    #     Reference: camera02"""
-    #     h, w = img_shape
-    #     # points in front of the LiDAR and vehicle
-    #     front_mask = points_3d[:, 0] > 0
-    #     # Point in (u,v) range
-    #     u, v = pixels[:, 0], pixels[:, 1]
-    #     image_mask = (u >= 0) & (u < w) & (v >= 0) & (v < h)
-    #     # Using the 2 mask to filter
-    #     final_mask = front_mask & image_mask
-    #     return final_mask
-    
-    # def filter_ground_simple(self, points_3d, ground_threshold=-1.5):
-    #     """Point only from the ground. The LiDAR is 1.73m above the ground, we filter to decrease number of points for detection.
-    #     reference: lidar"""
-    #     not_ground_mask = points_3d[:, 2] > ground_threshold
-    #     return not_ground_mask
-
-    # def filter_front_velo(self, points_3d, min_dist=0.0):
-    #     """Points only in front of the LiDAR and vehicle.we filter to decrease number of points for detection.
-    #     reference: lidar"""
-    #     return points_3d[:, 0] > min_dist
