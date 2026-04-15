@@ -1,0 +1,9 @@
+path: ./data/kitti_lidar
+train: train/images
+val: val/images
+test: test/images
+
+names:
+  0: car
+  1: pedestrian
+  2: cyclist

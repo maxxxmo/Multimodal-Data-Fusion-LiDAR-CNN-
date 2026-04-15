@@ -67,6 +67,9 @@ In the calibration file, there are times where matrix has a 1 line added. its fo
 
 Then we filter the data to keep only what's in front of the LiDAR sensor.
 
+***Attention:  dans raw c est selon lidar et dans synced selon camera***
+
+
 # Late fusion approach
 First we create a YOLO type Dataset using the tracking part of the dataset
 ## 1. CNN
@@ -77,7 +80,16 @@ First we create a YOLO type Dataset using the tracking part of the dataset
 TO DO improve the model...
 
 ## 2. LiDAR
+First we create a dataset to split the data.
+I want to use BEV (Bird Eye View) and more precisely Point Pillar 
+To do that there are library that already implements Point Pillar but its needs to be in () coordinates
+So i need to take the labels coordinates and translate them to the lidar Reference.
 
+
+Then my first model pillarbackbone was like this:
+This backbone takes the pseudo-image as input and outputs a feature map that can be used for detection.
+        in_channels: Number of channels in the input pseudo-image (e.g., 2 for height and density)  
+        out_channels: Number of channels in the output feature map (e.g., 7 for (x,y,z,l,w,h,yaw) per cell)"""
 ## 3. Fusion
 
 
@@ -89,7 +101,8 @@ TO DO improve the model...
 - [KITTI Coordinate Transformations](https://medium.com/data-science/kitti-coordinate-transformations-125094cd42fb)
 - [Vision meets Robotics: The KITTI Dataset](https://www.cvlibs.net/publications/Geiger2013IJRR.pdf)
 - [Camera-Lidar Projection: Navigating between 2D and 3D](https://medium.com/swlh/camera-lidar-projection-navigating-between-2d-and-3d-911c78167a94)
-
+- [open library for LiDAR detection](https://github.com/open-mmlab/OpenPCDet?tab=readme-ov-file)
+- [anchors](https://arxiv.org/pdf/2211.06108)
 - @article{Zhou2018,
    author  = {Qian-Yi Zhou and Jaesik Park and Vladlen Koltun},
    title   = {{Open3D}: {A} Modern Library for {3D} Data Processing},

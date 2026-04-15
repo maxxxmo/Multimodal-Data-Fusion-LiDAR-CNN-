@@ -1,0 +1,8 @@
+artifact_location: file:///C:/Users/maxmo/Documents/Max/multimodal_detector/mlruns/429621317766757696
+creation_time: 1776258926390
+experiment_id: '429621317766757696'
+last_update_time: 1776258926390
+lifecycle_stage: active
+name: multimodal_detector_lidar
+trace_location: null
+workspace: default
