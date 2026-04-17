@@ -1,7 +1,7 @@
 import torch
 
 def get_detected_boxes(preds, threshold=0.1):
-    """Extract detected boxes from model predictions based on a confidence threshold. """
+    """Extract detected boxes on the BEV view from model predictions based on a confidence threshold. """
     if preds.dim() == 4:
         preds = preds.squeeze(0)
     

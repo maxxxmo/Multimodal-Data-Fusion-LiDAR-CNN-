@@ -90,7 +90,7 @@ def run_train(config_path="./src/late_fusion/LiDAR/config.yaml"):
     loader = DataLoader(dataset, batch_size=config['train_params']['batch'], collate_fn=kitti_collate_fn, shuffle=True, num_workers=8)
 
     val_dataset = KittiPillarDataset(config_path=config_path, data_dir="./data/kitti_lidar", split='val')
-    val_loader = DataLoader(val_dataset, batch_size=config['train_params']['batch'], collate_fn=kitti_collate_fn, shuffle=False, num_workers=4)
+    val_loader = DataLoader(val_dataset, batch_size=config['train_params']['batch'], collate_fn=kitti_collate_fn, shuffle=True, num_workers=8)
     
     model = PillarBackbone(in_channels=config['dataset']['num_channels'])
     model.to(device)

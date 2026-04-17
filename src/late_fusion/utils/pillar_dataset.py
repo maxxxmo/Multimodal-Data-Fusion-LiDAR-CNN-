@@ -76,6 +76,7 @@ class KittiPillarDataset(Dataset):
                 pseudo_image[0, u[i], v[i]] = points[i, 2]
             # Canal 1: Density of the pillar
             pseudo_image[1, u[i], v[i]] += 0.1 
+        pseudo_image[1] = np.log1p(pseudo_image[1]) # normalisation of density
         return pseudo_image
 
     def __getitem__(self, idx):
