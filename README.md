@@ -13,28 +13,29 @@ LiDAR is for ***Light Detection And Ranging*** it works like a sonar with light.
     - if objects are far away they can be avoided by the light rays and not detected
 
 # Table of contents
-- [Getting Started](#getting-started)
-- [Dataset Handling and calibration](#Dataset-Handling-and-calibration)
-- [Late fusion approach](#late-fusion-approach)
-- [Middle fusion approach](#middle-fusion-approach)
-- [Sources](#sources)
-- [Future and improvments](#future-and-improvments)
+- [1 Getting Started](#1-getting-started)
+- [2 Data Handling and calibration](#2-dataset-handling-and-calibration)
+- [3 Late fusion approach](#3-late-fusion-approach)
+- [4 Middle fusion approach](#4-middle-fusion-approach)
+- [5 Sources](#5-sources)
+- [6 Future and improvments](#6-future-and-improvments)
+- [7 Glossary](#7-glossary)
 
 
-# Getting started
+# 1 Getting started
 (to do at the end of the project)
 To use this repo you need:
 
 ...
 
-# Dataset Handling and calibration
+# 2 Data Handling and calibration
 The dataset is composed of a tracking sub dataset, a velodyne dataset and videos to test the results.
 <!-- I did select 3 videos:
 ![alt text](images/dataset.png) -->
 Velodyn (named velo sometimes) refers to the LiDAR. I will use frames from camera 2 as it's the colored version.
 
 ![Sensor Setup](images/sensor_setup.png)
-## Coordinate system
+## 2.1 Coordinate system
 From the paper we know:
 ![cord system](images/cord_system.png)
 
@@ -45,7 +46,20 @@ and labels are:
 for
 
 Frame_ID Track_ID Type Truncated Occluded Alpha bbox_left bbox_top bbox_right bbox_bottom Height Width Length Location_X Location_Y Location_Z Rotation_y
-## Projection pipeline
+
+
+The dataset is big i want first to do only the computer vision then to do the LiDAR part alone too. Then i can do both together. To do that and avoid data leakage i will create 2 subdatasets (kitti_lidar & kitti_yolo) but both will be splitted the same:
+
+| split | sequence |
+|-------|-------|
+| train | 0-14  |
+| val   | 14-18 |
+| test  | 18-20 |
+
+Also i will simplify the task by changing classes to:
+ {"Car": 0, "Van": 0, "Truck": 0, "Pedestrian": 1, "Person_sitting": 1, "Cyclist": 2}
+
+## 2.2 Projection & Translation
 
 The LiDAR sensor and Camera 2 don't have the same position. The Kittit Dataset contain the data to project the LiDAR results on the camera referential.
 We  can summarize:
@@ -68,49 +82,116 @@ In the calibration file, there are times where matrix has a 1 line added. its fo
 Then we filter the data to keep only what's in front of the LiDAR sensor.
 
 ***Attention:  dans raw c est selon lidar et dans synced selon camera***
+### Calibration class
+
+This class purpose is to do the calibration.
+![Calibration Diagram](./images/calibration_diagram.png)
+
+*note : The method rect_to_velo should be renamed ***transform_rect_to_velo***
+
+## 2.3 Cloud Points Display
+
+# 3 Late fusion approach
+Late fusion is when each modality create a prediction of features or decision and those are grouped and use to make a final decision.
+
+![alt text](images/late_fusion_diagram.png)
 
 
-# Late fusion approach
-First we create a YOLO type Dataset using the tracking part of the dataset
-## 1. CNN
-### First Training
+## 3.1 CNN
+### 3.1.1 First Training
+I use Yolo with ultralytics as the experiments are easy to trace with the library and give all the plots directly.
+
 ![Confusion](images/confusion_matrix_normalized.png)
 ![results](images/results.png)
 
 TO DO improve the model...
 
-## 2. LiDAR
+## 3.2 LiDAR
+
+### 3.2.1 BEV and Point Pillars
 First we create a dataset to split the data.
-I want to use BEV (Bird Eye View) and more precisely Point Pillar 
-To do that there are library that already implements Point Pillar but its needs to be in () coordinates
+I want to use ***BEV (Bird Eye View)***:
+BEV consist in converting the 3D points in a 2D representation seen from the sky. 
+![Bird Eye View](images/BEV.png)
+
+More precisely i will use ***Point Pillar***:
+Point Pillar is a process to encode the 3D point cloud image to a 2D BEV image. The space is divided in pillars with different features encoded. The 2D image created is called the pseudo-image.
+
+Formy pillar i used the height and density.
+
+![point pillars](images/pointpillars_diagram.png)
+*image from [medium](https://becominghuman.ai/pointpillars-3d-point-clouds-bounding-box-detection-and-tracking-pointnet-pointnet-lasernet-67e26116de5a)*
+
+But has seen before labels are on image_02 referential and LiDAR point clouds are on Velodyne sensor referential.
+Labels are easier to translate.
 So i need to take the labels coordinates and translate them to the lidar Reference.
+### 3.2.2 Pillar Dataset class
+The goal is to have get the point clouds and labels on the same referential. The velodyne one here as moving labels will cost less computation.
+There are 3 important methods:
 
+- load_label() &rarr;
+- transform_to_pillar &rarr;
+- get_item() &rarr;
 
+### 3.2.3 Model & Loss - Iteration 1
 Then my first model pillarbackbone was like this:
 This backbone takes the pseudo-image as input and outputs a feature map that can be used for detection.
         in_channels: Number of channels in the input pseudo-image (e.g., 2 for height and density)  
         out_channels: Number of channels in the output feature map (e.g., 7 for (x,y,z,l,w,h,yaw) per cell)"""
-## 3. Fusion
+
+But the problem is i predict a box for each pillar. So in the end i get a number of predictions equal to the number of pillar.
+
+### 3.2.4 Model & Loss - Iteration 2
+In pillarbackbone2 i solved this problem adding a output feature.
+There are 2 [heads](#1-heads). 
+
+- classification head: Predict the probability of a presence of an object for each pillar
+- Regression head: Predict Bounding Box parameters (x,y,z,l,w,h,theta)
+
+Why only one [backbone](#2-backbone) and 2 heads? 
+
+&uarr; I work on my personnal computer limited on computation ressources. 
+1. Feature sharing: Using a single model reduce by 2 the number of convolution i will need. Backbone will extract the features needed fr both tasks.
+2. Backbone learn features that will help fir both tasks
+3. Easy to implement : Only one model to train
+
+As there are two heads i need to adapt my loss function:
+- classification head (BCEWithLogitsLoss): Calculated on entire grid: Penalize if the model miss an object or predict a box where there should not be a box
+- Regression head (SmoothL1Loss): Calculated on masked pillars (where an object actually exist): Its like that so the model doesnt learn on empty space.
 
 
-# Middle fusion approach
+## 3.3 Fusion
+
+
+# 4 Middle fusion approach
 
 
 
-# Sources
+# 5 Sources
 - [KITTI Coordinate Transformations](https://medium.com/data-science/kitti-coordinate-transformations-125094cd42fb)
 - [Vision meets Robotics: The KITTI Dataset](https://www.cvlibs.net/publications/Geiger2013IJRR.pdf)
 - [Camera-Lidar Projection: Navigating between 2D and 3D](https://medium.com/swlh/camera-lidar-projection-navigating-between-2d-and-3d-911c78167a94)
 - [open library for LiDAR detection](https://github.com/open-mmlab/OpenPCDet?tab=readme-ov-file)
-- [anchors](https://arxiv.org/pdf/2211.06108)
-- @article{Zhou2018,
+- [Bird Eye View](https://medium.com/@nikitamalviya/birds-eye-view-a-new-perspective-20323ee06fdf)
+- [ late fusion medium](https://medium.com/@raj.pulapakura/multimodal-models-and-fusion-a-complete-guide-225ca91f6861#ea9c)
+- [anchors?](https://arxiv.org/pdf/2211.06108)
+- [Point Pillar](https://arxiv.org/pdf/1812.05784)
+- >@article{Zhou2018,
    author  = {Qian-Yi Zhou and Jaesik Park and Vladlen Koltun},
    title   = {{Open3D}: {A} Modern Library for {3D} Data Processing},
    journal = {arXiv:1801.09847},
    year    = {2018},
 }
+>
 
 
-## Data Sources
 
-# Future and improvments
+## 5.1 Data Sources
+
+# 6 Future and improvments
+
+# 7 Glossary
+##### 1 Heads
+Final part of the network that convert features to a prediction
+##### 2 Backbone
+It's the part of the model that takes raw data and converts it to features

@@ -51,42 +51,6 @@ class KittiPillarDataset(Dataset):
         
         return np.array(annotations, dtype=np.float32)
 
-
-
-    # def load_label(self, file_id, calib):
-    #         annotations = []
-    #         label_file = self.label_path / f"{file_id}.txt"
-    #         if not label_file.exists(): 
-    #             print(f"label file {label_file} not found, returning empty annotations!!!!!")
-    #             return np.array([])
-    #         pc_range = self.dataset_config['pc_range'] # [x_min, y_min, z_min, x_max, y_max, z_max]
-
-    #         with open(label_file, 'r') as f:
-    #             lines = f.readlines()
-    #             for line in lines:
-    #                 p = line.split()
-    #                 if p[0] == 'DontCare': continue
-                    
-    #                 # Dimensions
-    #                 h, w, l = float(p[8]), float(p[9]), float(p[10])
-    #                 # Position Caméra (Rectifiée)
-    #                 loc_cam = np.array([[float(p[11]), float(p[12]), float(p[13])]])
-    #                 ry = float(p[14]) 
-                    
-    #                 # Transformation vers LiDAR
-    #                 loc_lidar = calib.project_rect_to_velo(loc_cam).flatten()
-                    
-    #                 # Correction de la hauteur (KITTI cam est au sol, on veut le centre en LiDAR)
-    #                 actual_z = loc_lidar[2] + h / 2
-                    
-
-
-    #                 yaw_lidar = -ry - np.pi / 2 
-    #                 annotations.append([loc_lidar[0], loc_lidar[1], actual_z, l, w, h, yaw_lidar])
-            
-    #         return np.array(annotations, dtype=np.float32)
-
-
     def transform_to_pillars(self, points):
         """Simplified version, Create a pseudo-image from LiDAR points"""
         pc_range = self.dataset_config['pc_range']

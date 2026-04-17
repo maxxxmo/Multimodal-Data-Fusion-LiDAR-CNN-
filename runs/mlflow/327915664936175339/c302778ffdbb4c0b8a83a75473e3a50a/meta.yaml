@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/maxmo/Documents/Max/multimodal_detector/runs/mlflow/327915664936175339/c302778ffdbb4c0b8a83a75473e3a50a/artifacts
+end_time: 1776412642191
+entry_point_name: ''
+experiment_id: '327915664936175339'
+lifecycle_stage: active
+run_id: c302778ffdbb4c0b8a83a75473e3a50a
+run_name: yolov8n.pt_20260417-0935
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1776411409032
+status: 3
+tags: []
+user_id: maxmo
