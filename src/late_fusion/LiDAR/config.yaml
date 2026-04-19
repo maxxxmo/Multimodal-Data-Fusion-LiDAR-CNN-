@@ -2,13 +2,13 @@ dataset:
   pc_range: [0, -39.68, -3, 69.12, 39.68, 1]
   grid_size: [432, 496]
   data_path: "./data/kitti_lidar"
-  num_channels: 2
+  num_channels: 3
 train_params:
-  workers: 8          
-  batch: 8          
+  workers: 4         
+  batch: 16          
   epochs: 100
   optimizer: "AdamW"
-  lr: 0.001       
+  lr: 0.01       
   weight_decay: 0.01  
   patience: 10        
   save: True          
