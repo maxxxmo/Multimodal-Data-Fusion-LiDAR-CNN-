@@ -42,97 +42,6 @@ def draw_gaussian(heatmap, center, radius):
     return heatmap
 
 
-
-
-# def create_heatmaps(targets, grid_size=(432, 496), pc_range=[0, -39.68, 69.12, 39.68], radius=5):
-#     """
-#     targets: tenseur (N, 7) [x, y, z, w, l, h, theta]
-#     """
-#     H, W = grid_size
-#     x_min, y_min, x_max, y_max = pc_range
-    
-#     voxel_size_x = (x_max - x_min) / W
-#     voxel_size_y = (y_max - y_min) / H
-    
-#     cls_heatmap = torch.zeros((1, H, W))
-#     reg_grid = torch.zeros((7, H, W))
-    
-#     for obj in targets:
-#         gx_float = (obj[0] - x_min) / voxel_size_x
-#         gy_float = (obj[1] - y_min) / voxel_size_y
-        
-#         gx, gy = int(gx_float), int(gy_float)
-        
-#         if 0 <= gx < W and 0 <= gy < H:
-#             draw_gaussian(cls_heatmap[0], (gy, gx), radius)
-            
-#             # --- 1. Offsets (x, y) ---
-#             pixel_center_x = (gx + 0.5) * voxel_size_x + x_min
-#             pixel_center_y = (gy + 0.5) * voxel_size_y + y_min
-#             reg_grid[0, gy, gx] = (obj[0] - pixel_center_x) / voxel_size_x # dx
-#             reg_grid[1, gy, gx] = (obj[1] - pixel_center_y) / voxel_size_y # dy
-            
-#             # --- 2. Z : Normalisation simple par la range ---
-#             reg_grid[2, gy, gx] = obj[2] 
-            
-#             # --- 3. Dimensions (w, l, h) : Log-transform ---
-#             # Le log aide à gérer les ordres de grandeur (ex: piéton vs camion)
-#             # On ajoute un epsilon pour éviter log(0)
-#             reg_grid[3:6, gy, gx] = torch.log(obj[3:6] + 1e-6) 
-            
-#             # --- 4. Theta (Angle) : Sin/Cos Encoding ---
-#             # Ne jamais régresser l'angle brut (0-2pi), car 0 et 2pi sont proches
-#             # mais le modèle les voit comme opposés.
-#             reg_grid[6, gy, gx] = obj[6] # Garde theta ici, mais regarde l'astuce ci-dessous
-            
-#     return cls_heatmap, reg_grid
-
-
-
-# def create_heatmaps(targets, grid_size=(432, 496), pc_range=[0, -39.68, 69.12, 39.68], radius=5):
-#     """
-#     targets: tenseur (N, 7) [x, y, z, w, l, h, theta]
-#     """
-#     H, W = grid_size
-#     x_min, y_min, x_max, y_max = pc_range
-    
-#     voxel_size_x = (x_max - x_min) / W
-#     voxel_size_y = (y_max - y_min) / H
-    
-#     cls_heatmap = torch.zeros((1, H, W))
-#     reg_grid = torch.zeros((7, H, W))
-    
-#     for obj in targets:
-#         gx_float = (obj[0] - x_min) / voxel_size_x
-#         gy_float = (obj[1] - y_min) / voxel_size_y
-        
-#         gx, gy = int(gx_float), int(gy_float)
-        
-#         if 0 <= gx < W and 0 <= gy < H:
-#             draw_gaussian(cls_heatmap[0], (gy, gx), radius)
-            
-#             # --- 1. Offsets (x, y) ---
-#             pixel_center_x = (gx + 0.5) * voxel_size_x + x_min
-#             pixel_center_y = (gy + 0.5) * voxel_size_y + y_min
-#             reg_grid[0, gy, gx] = (obj[0] - pixel_center_x) / voxel_size_x # dx
-#             reg_grid[1, gy, gx] = (obj[1] - pixel_center_y) / voxel_size_y # dy
-            
-#             # --- 2. Z : Normalisation simple par la range ---
-#             reg_grid[2, gy, gx] = obj[2] 
-            
-#             # --- 3. Dimensions (w, l, h) : Log-transform ---
-#             # Le log aide à gérer les ordres de grandeur (ex: piéton vs camion)
-#             # On ajoute un epsilon pour éviter log(0)
-#             reg_grid[3:6, gy, gx] = torch.log(obj[3:6] + 1e-6) 
-            
-#             # --- 4. Theta (Angle) : Sin/Cos Encoding ---
-#             # Ne jamais régresser l'angle brut (0-2pi), car 0 et 2pi sont proches
-#             # mais le modèle les voit comme opposés.
-#             reg_grid[6, gy, gx] = obj[6] # Garde theta ici, mais regarde l'astuce ci-dessous
-            
-#     return cls_heatmap, reg_grid
-
-
 def create_heatmaps(targets, grid_size=(432, 496), pc_range=[0, -39.68, 69.12, 39.68], radius=5):
     H, W = grid_size
     x_min, y_min, x_max, y_max = pc_range
@@ -196,7 +105,7 @@ def validate(model, loader, criterion, device):
     total_obs = 0
     total_samples = 0
     with torch.no_grad():
-        for batch in loader:
+        for i, batch in enumerate(loader):
             inputs = batch["inputs"].to(device).float()
             targets = {
             "cls": batch["targets"]["cls"].to(device).float(),
@@ -204,7 +113,19 @@ def validate(model, loader, criterion, device):
         }
 
             cls_logits, reg_preds = model(inputs)
-            loss, n_obs, losses = criterion((cls_logits, reg_preds), targets)
+            
+            if i == 0:  # Juste sur le premier batch pour ne pas polluer les logs
+                print(f"\n[DEBUG VAL] Stats CLS (Logits): Min={cls_logits.min():.2f}, Max={cls_logits.max():.2f}, Mean={cls_logits.mean():.2f}")
+                print(f"[DEBUG VAL] Stats REG (Preds): Min={reg_preds.min():.2f}, Max={reg_preds.max():.2f}, Mean={reg_preds.mean():.2f}")
+                
+                # Vérification du background : quelle proportion est considérée comme "objet" ?
+                # Applique une sigmoid si nécessaire (selon ton modèle)
+                probs = torch.sigmoid(cls_logits)
+                is_obj = (probs > 0.5).float()
+                print(f"[DEBUG VAL] Proportion pixels prédits comme objets: {is_obj.mean():.4f}")
+                
+                
+            loss, n_obs = criterion((cls_logits, reg_preds), targets)
 
 
             
@@ -259,7 +180,7 @@ def train_one_epoch(model, loader, optimizer, criterion, device, scaler=torch.am
 
 
 
-            loss, n_obs, losses = criterion((cls_logits, reg_preds), targets)
+            loss, n_obs = criterion((cls_logits, reg_preds), targets)
         
         scaler.scale(loss).backward()
         scaler.step(optimizer)
@@ -311,18 +232,16 @@ def run_train(config_path="./src/late_fusion/LiDAR/config.yaml"):
     clean_train_params = {k: (str(v) if isinstance(v, (list, dict)) else v) for k, v in config['train_params'].items()}
 
     with mlflow.start_run(run_name=run_id):
-        print(f"debug params and dataset type for mlflow logging: config['dataset']={clean_dataset_config}, type={clean_train_params}")
+        # print(f"debug params and dataset type for mlflow logging: config['dataset']={clean_dataset_config}, type={clean_train_params}")
         mlflow.log_params(clean_dataset_config)
         mlflow.log_params(clean_train_params)
 
-        print(f"starting training on : {device}")
+        # print(f"starting training on : {device}")
         
         for epoch in range(config['train_params']['epochs']):
             avg_loss = train_one_epoch(model, loader, optimizer, criterion, device)
-            
             mlflow.log_metric("train_loss", float(avg_loss), step=epoch)
             print(f"Epoch {epoch+1}/{config['train_params']['epochs']} - Loss: {avg_loss:.4f}")
-            
             avg_val_loss = validate(model, val_loader, criterion, device)
             mlflow.log_metric("val_loss", float(avg_val_loss), step=epoch)
             print(f"Epoch {epoch+1}/{config['train_params']['epochs']} - Val Loss: {avg_val_loss:.4f}")
@@ -337,6 +256,57 @@ def run_train(config_path="./src/late_fusion/LiDAR/config.yaml"):
         print(f"training done, saved in: {run_id}")
         
     torch.save(model.state_dict(), save_path / model_name)
+    
+    
+def run_debug_one_batch(model, loader, optimizer, criterion, device):
+    model.train()
+    model.to(device)
+    # On récupère le premier batch
+    try:
+        batch = next(iter(loader))
+    except StopIteration:
+        print("Erreur: Le loader est vide.")
+        return
+
+    inputs = batch["inputs"].to(device).float()
+    targets = {
+        "cls": batch["targets"]["cls"].to(device).float(),
+        "reg": batch["targets"]["reg"].to(device).float()
+    }
+    inputs.to(device)
+    print(f"DEBUG: Input shape {inputs.shape} | Target CLS shape {targets['cls'].shape}")
+    
+    for i in range(100):
+        optimizer.zero_grad()
+        
+        # Forward
+        cls_logits, reg_preds = model(inputs)
+        loss, _ = criterion((cls_logits, reg_preds), targets)
+        
+        # Backward
+        loss.backward()
+        
+        # Check gradients (si c'est 0, ton backward est mort)
+        grad_norm = sum(p.grad.detach().abs().sum() for p in model.parameters() if p.grad is not None)
+        
+        optimizer.step()
+        
+        if i % 10 == 0:
+            print(f"Step {i} | Loss: {loss.item():.6f} | Grad Norm: {grad_norm:.4f}")
+            
+# if __name__ == "__main__":
+#     with open("./src/late_fusion/LiDAR/config.yaml", 'r') as f:
+#         config = yaml.safe_load(f)     
+#     criterion = DetectionLoss()
+#     model = PillarBackbone(in_channels=3)  
+#     loader = DataLoader(KittiPillarDataset(config_path="./src/late_fusion/LiDAR/config.yaml", data_dir="./data/kitti_lidar", split='train'), batch_size=2, collate_fn=kitti_collate_fn)
+#     optimizer  = optim.Adam(model.parameters(), lr=config['train_params']['lr'])
+#     try:
+#         run_debug_one_batch(model, loader, optimizer, criterion, torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
+#     except Exception as e:
+#         import traceback
+#         traceback.print_exc()        
+            
 if __name__ == "__main__":
     try:
             run_train()

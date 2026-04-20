@@ -1,13 +1,20 @@
 import torch
 import torch.nn as nn
 
-def focal_loss(logits, targets, alpha=0.25, gamma=2.0): # Gamma passé à 2.0
+
+def focal_loss(logits, targets, alpha=0.25, gamma=2.0):
     probs = torch.sigmoid(logits)
-    # pt : probabilité de la classe réelle
-    pt = probs * targets + (1 - probs) * (1 - targets)
-    log_p = torch.log(pt + 1e-6)
-    loss = -alpha * (1 - pt)**gamma * log_p
-    return loss.mean() # Laisser mean() ici est correct pour le fond
+    alpha_t = targets * alpha + (1 - targets) * (1 - alpha)
+    
+    bce = nn.functional.binary_cross_entropy_with_logits(logits, targets, reduction='none')
+    p_t = probs * targets + (1 - probs) * (1 - targets)
+    modulating_factor = (1 - p_t)**gamma
+    
+    loss = alpha_t * modulating_factor * bce
+    
+    # AU LIEU DE .mean(), on normalise uniquement par le nombre de positifs
+    num_pos = (targets > 0.1).float().sum() + 1e-6
+    return loss.sum() / num_pos
 
 class DetectionLoss(nn.Module):
     def __init__(self):
@@ -32,5 +39,4 @@ class DetectionLoss(nn.Module):
         num_pos = mask.sum() + 1e-6
         reg_loss = (reg_loss_map * mask).sum() / num_pos
         
-        losses = {"cls": cls_loss, "reg": reg_loss}
-        return cls_loss + (10.0 * reg_loss), num_pos.item(), losses
+        return cls_loss + reg_loss, num_pos.item()

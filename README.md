@@ -146,7 +146,7 @@ In pillarbackbone2 i solved this problem adding a output feature.
 There are 2 [heads](#1-heads). 
 
 - classification head: Predict the probability of a presence of an object for each pillar
-- Regression head: Predict Bounding Box parameters (x,y,z,l,w,h,theta)
+- Regression head: Predict Bounding Box parameters (x,y,z,l,w,h,theta) --> I switch to vectors from the center because it was to hard for the model
 
 Why only one [backbone](#2-backbone) and 2 heads? 
 
@@ -159,6 +159,46 @@ As there are two heads i need to adapt my loss function:
 - classification head (BCEWithLogitsLoss): Calculated on entire grid: Penalize if the model miss an object or predict a box where there should not be a box
 - Regression head (SmoothL1Loss): Calculated on masked pillars (where an object actually exist): Its like that so the model doesnt learn on empty space.
 
+### 3.25 Model & Loss - Iteration 3
+
+```bash
+Step 140 | Pred Mean (dx,dy): -0.0015 | Target Mean (dx,dy): -0.0001
+Stats cibles: Min=-4.18, Max=1.19
+Step 160 | Pred Mean (dx,dy): -0.0004 | Target Mean (dx,dy): 0.0014
+Stats cibles: Min=-4.64, Max=1.57
+Step 180 | Pred Mean (dx,dy): 0.0029 | Target Mean (dx,dy): -0.0000
+Stats cibles: Min=-4.70, Max=1.57
+Step 200 | Pred Mean (dx,dy): -0.0004 | Target Mean (dx,dy): -0.0002
+Stats cibles: Min=-4.69, Max=1.57
+Step 220 | Pred Mean (dx,dy): 0.0005 | Target Mean (dx,dy): 0.0002
+Stats cibles: Min=-4.70, Max=1.56
+Step 240 | Pred Mean (dx,dy): 0.0009 | Target Mean (dx,dy): 0.0001
+Stats cibles: Min=-4.71, Max=1.40
+Step 260 | Pred Mean (dx,dy): -0.0037 | Target Mean (dx,dy): -0.0007
+Stats cibles: Min=-4.60, Max=1.57
+Step 280 | Pred Mean (dx,dy): -0.0018 | Target Mean (dx,dy): 0.0002
+Stats cibles: Min=-4.59, Max=1.52
+Step 300 | Pred Mean (dx,dy): 0.0020 | Target Mean (dx,dy): 0.0005
+Epoch 2/5 - Loss: 0.2825
+
+[DEBUG VAL] Stats CLS (Logits): Min=-10.11, Max=-3.31, Mean=-3.69
+[DEBUG VAL] Stats REG (Preds): Min=-0.87, Max=0.90, Mean=0.01
+[DEBUG VAL] Proportion pixels prédits comme objets: 0.0000
+Epoch 2/5 - Val Loss: 0.2816
+debug metrics types: train_loss=<class 'float'>, val_loss=<class 'float'>
+Stats cibles: Min=-4.70, Max=1.57
+Step 0 | Pred Mean (dx,dy): -0.0002 | Target Mean (dx,dy): -0.0000
+Stats cibles: Min=-4.27, Max=1.40
+Step 20 | Pred Mean (dx,dy): 0.0016 | Target Mean (dx,dy): -0.0005
+Stats cibles: Min=-4.38, Max=1.51
+Step 40 | Pred Mean (dx,dy): -0.0004 | Target Mean (dx,dy): 0.0016
+Stats cibles: Min=-4.70, Max=1.56
+Step 60 | Pred Mean (dx,dy): -0.0021 | Target Mean (dx,dy): -0.0004
+```
+
+The issue was
+
+So i directly switch to an anchor based model.
 
 ## 3.3 Fusion
 
