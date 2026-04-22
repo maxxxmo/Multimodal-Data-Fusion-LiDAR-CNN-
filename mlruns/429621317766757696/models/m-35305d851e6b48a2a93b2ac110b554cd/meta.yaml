@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/maxmo/Documents/Max/multimodal_detector/mlruns/429621317766757696/models/m-35305d851e6b48a2a93b2ac110b554cd/artifacts
+creation_timestamp: 1776780942273
+experiment_id: '429621317766757696'
+last_updated_timestamp: 1776780947468
+model_id: m-35305d851e6b48a2a93b2ac110b554cd
+model_type: null
+name: pillar_backbone_best_model
+source_run_id: 127122d91ebe4a37993d9523e70c682d
+status: 2
+status_message: null

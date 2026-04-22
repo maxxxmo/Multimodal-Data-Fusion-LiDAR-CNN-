@@ -8,10 +8,12 @@ import mlflow
 from torch.utils.data import DataLoader
 from pathlib import Path
 import numpy as np
+from torchmetrics.classification import BinaryPrecision, BinaryRecall
 
+from src.late_fusion.LiDAR.anchors import AnchorGenerator, TargetAssigner, encode_targets
 from src.late_fusion.utils.pillar_dataset import KittiPillarDataset
-from src.late_fusion.LiDAR.pillarbackbone2 import PillarBackbone
-from src.late_fusion.LiDAR.detectionloss2 import DetectionLoss
+from src.late_fusion.LiDAR.pillarbackbone3 import PillarBackbone
+from src.late_fusion.LiDAR.anchorloss import AnchorDetectionLoss as DetectionLoss
 
 model_name ="best_Lidar_model.pth"
 
@@ -41,186 +43,134 @@ def draw_gaussian(heatmap, center, radius):
     heatmap[top:bottom, left:right] = torch.max(heatmap[top:bottom, left:right], masked_gaussian)
     return heatmap
 
-
-def create_heatmaps(targets, grid_size=(432, 496), pc_range=[0, -39.68, 69.12, 39.68], radius=5):
-    H, W = grid_size
-    x_min, y_min, x_max, y_max = pc_range
-    voxel_size_x = (x_max - x_min) / W
-    voxel_size_y = (y_max - y_min) / H
-    
-    cls_heatmap = torch.zeros((1, H, W))
-    reg_grid = torch.zeros((7, H, W))
-    
-    for obj in targets:
-        gx = int((obj[0] - x_min) / voxel_size_x)
-        gy = int((obj[1] - y_min) / voxel_size_y)
-        
-        if 0 <= gx < W and 0 <= gy < H:
-            draw_gaussian(cls_heatmap[0], (gy, gx), radius)
-            
-            # Offsets normalisés pour rester dans [-1, 1]
-            reg_grid[0, gy, gx] = (obj[0] - ((gx + 0.5) * voxel_size_x + x_min)) / voxel_size_x
-            reg_grid[1, gy, gx] = (obj[1] - ((gy + 0.5) * voxel_size_y + y_min)) / voxel_size_y
-            
-            # Z: Normalisation par la plage totale (ici 4m, de -3 à 1)
-            reg_grid[2, gy, gx] = (obj[2] + 3.0) / 4.0 
-            
-            # Dimensions: Log transformé mais divisé par une valeur typique (ex: 2.0)
-            reg_grid[3:6, gy, gx] = torch.log(obj[3:6] + 1e-6) / 2.0
-            
-            # Theta: inchangé, c'est déjà un angle
-            reg_grid[6, gy, gx] = obj[6] 
-            
-    return cls_heatmap, reg_grid
-
-
-def kitti_collate_fn(batch):
-    """How to stack samples, images are already the same sizes so easy to stack but labels are lists of varying lengths"""
-
-    inputs = torch.stack([item['input'] for item in batch])
-    
-    batch_cls = []
-    batch_reg = []
-    
-    for item in batch:
-        # On appelle la fonction pour chaque échantillon du batch
-        # Assure-toi que item['target'] est bien le tenseur (N, 7)
-        c_map, r_map = create_heatmaps(item['target'])
-        batch_cls.append(c_map)
-        batch_reg.append(r_map)
-    
-    # On stacke tout pour créer les tenseurs (Batch, C, H, W)
-    cls_maps = torch.stack(batch_cls)
-    reg_maps = torch.stack(batch_reg)
-    
-    return {
-        "inputs": inputs, 
-        "targets": {"cls": cls_maps, "reg": reg_maps}, 
-        "ids": [item['id'] for item in batch]
-    }
-
-def validate(model, loader, criterion, device):
-    model.eval() 
+def validate(model, loader, criterion, device, precision_metric, recall_metric):
+    model.eval()
     val_loss = 0
-    total_obs = 0
     total_samples = 0
+    
+    # Reset des métriques pour cette validation
+    precision_metric.reset()
+    recall_metric.reset()
+    
     with torch.no_grad():
-        for i, batch in enumerate(loader):
+        for batch in loader:
             inputs = batch["inputs"].to(device).float()
-            targets = {
-            "cls": batch["targets"]["cls"].to(device).float(),
-            "reg": batch["targets"]["reg"].to(device).float()
-        }
+            cls_target = batch["targets"]["cls"].to(device).float()
+            cls_target[cls_target == -1] = 0
 
+            reg_target = batch["targets"]["reg"].to(device).float()
+            pos_mask = batch["pos_mask"].to(device).bool()
+            
             cls_logits, reg_preds = model(inputs)
+            loss = criterion(cls_logits, reg_preds, cls_target, reg_target, pos_mask)
             
-            if i == 0:  # Juste sur le premier batch pour ne pas polluer les logs
-                print(f"\n[DEBUG VAL] Stats CLS (Logits): Min={cls_logits.min():.2f}, Max={cls_logits.max():.2f}, Mean={cls_logits.mean():.2f}")
-                print(f"[DEBUG VAL] Stats REG (Preds): Min={reg_preds.min():.2f}, Max={reg_preds.max():.2f}, Mean={reg_preds.mean():.2f}")
-                
-                # Vérification du background : quelle proportion est considérée comme "objet" ?
-                # Applique une sigmoid si nécessaire (selon ton modèle)
-                probs = torch.sigmoid(cls_logits)
-                is_obj = (probs > 0.5).float()
-                print(f"[DEBUG VAL] Proportion pixels prédits comme objets: {is_obj.mean():.4f}")
-                
-                
-            loss, n_obs = criterion((cls_logits, reg_preds), targets)
-
-
+            # Calcul des métriques
+            probs = torch.sigmoid(cls_logits)
+            precision_metric(probs, cls_target)
+            recall_metric(probs, cls_target)
             
-            total_obs += n_obs
             batch_size = inputs.size(0)
             val_loss += loss.item() * batch_size
             total_samples += batch_size
+            
+    # Calcul des scores finaux
+    final_prec = precision_metric.compute()
+    final_recall = recall_metric.compute()
+    
+    return val_loss / total_samples, final_prec, final_recall
 
-    return val_loss / total_samples
-
-
-
-def train_one_epoch(model, loader, optimizer, criterion, device, scaler=torch.amp.GradScaler('cuda')):
+def train_one_epoch(model, loader, optimizer, criterion, device, scaler):
     model.train()
-    epoch_loss = 0
+    epoch_loss = 0.0
+    
+    # On itère avec un tqdm pour suivre la progression en temps réel
     for i, batch in enumerate(loader):
         inputs = batch["inputs"].to(device).float()
-        
-        # On définit les cibles
-        reg_target = batch["targets"]["reg"].to(device).float()
         cls_target = batch["targets"]["cls"].to(device).float()
-        targets = {"cls": cls_target, "reg": reg_target}
+        reg_target = batch["targets"]["reg"].to(device).float()
+        pos_mask = batch["pos_mask"].to(device).bool() # Le mask doit être un booléen
         
         optimizer.zero_grad()
         
-        # Passage dans le modèle
+        # 1. Utilisation du Mixed Precision (autocast)
         with torch.amp.autocast('cuda'):
             cls_logits, reg_preds = model(inputs)
-            
-            # Correction du debug pour matcher les dimensions
-            if i % 20 == 0:
-                # print(f"predictions: cls_logits {cls_logits}, reg_preds {reg_preds}")
-                print(f"Stats cibles: Min={reg_target.min():.2f}, Max={reg_target.max():.2f}")
-                # 1. On crée le masque spatial (batch, H, W)
-                # On prend le premier canal de cls_target qui est (B, 1, H, W) -> on squeeze
-                mask = (cls_target.squeeze(1) > 0.1) 
-                
-                # 2. On applique le masque sur reg_preds
-                # reg_preds est (B, 7, H, W)
-                # mask est (B, H, W)
-                # On veut les valeurs où mask est True. 
-                # .permute(1, 0, 2, 3) permet d'isoler les 7 canaux avant le masquage
-                significant_preds = reg_preds.permute(1, 0, 2, 3)[:, mask]
-                significant_targets = reg_target.permute(1, 0, 2, 3)[:, mask]
-                
-                if significant_preds.shape[1] > 0:
-                    # On ne prend que les canaux 0 et 1 (dx, dy) pour le print
-                    pred_mean = significant_preds[0:2].mean().item()
-                    target_mean = significant_targets[0:2].mean().item()
-                    
-                    print(f"Step {i} | Pred Mean (dx,dy): {pred_mean:.4f} | Target Mean (dx,dy): {target_mean:.4f}")
-
-
-
-            loss, n_obs = criterion((cls_logits, reg_preds), targets)
+            loss = criterion(cls_logits, reg_preds, cls_target, reg_target, pos_mask)
         
+        # 2. Scaler pour éviter les underflows de gradient (Float16)
         scaler.scale(loss).backward()
+        
+        # 3. Gradient Clipping : Crucial pour les modèles 3D pour éviter l'explosion
+        scaler.unscale_(optimizer)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+        
         scaler.step(optimizer)
         scaler.update()
         
+        # Cumul de la perte pour les logs
         epoch_loss += loss.item()
         
+        # Logging léger pour le débug
+        if i % 50 == 0:
+            print(f"Batch {i} | Loss: {loss.item():.4f} | Pos Anchors: {pos_mask.sum().item()}")
+
     return epoch_loss / len(loader)
 
-
 def run_train(config_path="./src/late_fusion/LiDAR/config.yaml"):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     project_root = os.path.abspath(os.path.join(os.getcwd()))
     mlflow_path = os.path.join(project_root, "mlruns")
     mlflow.set_tracking_uri(f"file:///{mlflow_path.replace(os.sep, '/')}")
     
-    
+    precision_metric = BinaryPrecision(threshold=0.8).to(device)
+    recall_metric = BinaryRecall(threshold=0.8).to(device)
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration non trouvée : {config_path}")
 
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
     run_id = f"{config['model_variant']}_{timestamp}"
 
-
-    dataset = KittiPillarDataset(config_path= "./src/late_fusion/LiDAR/config.yaml", data_dir="./data/kitti_lidar", split='train')
-    loader = DataLoader(dataset, batch_size=config['train_params']['batch'], collate_fn=kitti_collate_fn, shuffle=True, num_workers=8,pin_memory=True)
-
-    val_dataset = KittiPillarDataset(config_path=config_path, data_dir="./data/kitti_lidar", split='val')
-    val_loader = DataLoader(val_dataset, batch_size=config['train_params']['batch'], collate_fn=kitti_collate_fn, num_workers=8,pin_memory=True)
     
-    model = PillarBackbone(in_channels=config['dataset']['num_channels'])
+    config_dataset = config['dataset']
+
+    # Extraction des dimensions
+    # Note: config['dataset']['grid_size'] est [432, 496] -> (H, W)
+    H, W = config_dataset['grid_size']
+    pc_range = config_dataset['pc_range'] # [0, -39.68, -3, 69.12, 39.68, 1]
+
+
+    anchor_gen = AnchorGenerator(
+        feature_map_size=(H, W), 
+        # anchor_sizes=[[3.9, 1.6, 1.56], [0.8, 0.6, 1.73]],  # TO DO , put in the YAML config
+        # anchor_rotations=[0, np.pi/2],  # TO DO , put in the YAML config
+        anchor_sizes=[[3.9, 1.6, 1.56]] , # TO DO , put in the YAML config
+        anchor_rotations=[0], # TO DO , put in the YAML config
+        pc_range=pc_range
+    )
+    target_assigner = TargetAssigner(iou_thresholds=(0.6, 0.8))
+    
+
+    dataset = KittiPillarDataset(config_path= "./src/late_fusion/LiDAR/config.yaml", data_dir="./data/kitti_lidar", split='train',anchor_gen=anchor_gen,target_assigner=target_assigner)
+    loader = DataLoader(dataset, batch_size=config['train_params']['batch'], shuffle=True, num_workers=0,pin_memory=False)
+
+    val_dataset = KittiPillarDataset(config_path=config_path, data_dir="./data/kitti_lidar", split='val',anchor_gen=anchor_gen,target_assigner=target_assigner)
+    val_loader = DataLoader(val_dataset, batch_size=config['train_params']['batch'], num_workers=0,pin_memory=False)
+    
+    num_types = len([[3.9, 1.6, 1.56]])       
+    num_rots = len([0])
+    total_anchors = num_types * num_rots 
+    
+    model = PillarBackbone(in_channels=config['dataset']['num_channels'], num_anchors=total_anchors)
     model.to(device)
 
 
     optimizer = optim.Adam(model.parameters(), lr=config['train_params']['lr'])
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-    criterion = DetectionLoss() 
+    criterion = DetectionLoss(num_anchors=total_anchors) 
     
     best_val_loss = float('inf')
     #  MLflow Tracking
@@ -231,81 +181,41 @@ def run_train(config_path="./src/late_fusion/LiDAR/config.yaml"):
     clean_dataset_config = {k: (str(v) if isinstance(v, list) else v) for k, v in config['dataset'].items()}
     clean_train_params = {k: (str(v) if isinstance(v, (list, dict)) else v) for k, v in config['train_params'].items()}
 
+    # 1. Instancie le scaler avant la boucle
+    scaler = torch.amp.GradScaler('cuda')
+
     with mlflow.start_run(run_name=run_id):
-        # print(f"debug params and dataset type for mlflow logging: config['dataset']={clean_dataset_config}, type={clean_train_params}")
         mlflow.log_params(clean_dataset_config)
         mlflow.log_params(clean_train_params)
-
-        # print(f"starting training on : {device}")
         
         for epoch in range(config['train_params']['epochs']):
-            avg_loss = train_one_epoch(model, loader, optimizer, criterion, device)
+            # 2. Passe le scaler ici
+            avg_loss = train_one_epoch(model, loader, optimizer, criterion, device, scaler)
             mlflow.log_metric("train_loss", float(avg_loss), step=epoch)
-            print(f"Epoch {epoch+1}/{config['train_params']['epochs']} - Loss: {avg_loss:.4f}")
-            avg_val_loss = validate(model, val_loader, criterion, device)
-            mlflow.log_metric("val_loss", float(avg_val_loss), step=epoch)
-            print(f"Epoch {epoch+1}/{config['train_params']['epochs']} - Val Loss: {avg_val_loss:.4f}")
-            print(f"debug metrics types: train_loss={type(avg_loss)}, val_loss={type(avg_val_loss)}")
             
+            # avg_val_loss = validate(model, val_loader, criterion, device)
+            avg_val_loss, val_prec, val_recall = validate(model, val_loader, criterion, device, precision_metric, recall_metric)
+            mlflow.log_metric("val_loss", float(avg_val_loss), step=epoch)
+            mlflow.log_metric("val_precision", float(val_prec), step=epoch)
+            mlflow.log_metric("val_recall", float(val_recall), step=epoch)
+            print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Prec: {val_prec:.4f} | Rec: {val_recall:.4f}")            
             scheduler.step(avg_val_loss)
             
-            
+            # 3. Sauvegarde uniquement si c'est le meilleur modèle
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-        mlflow.pytorch.log_model(model, "pillar_backbone_best_model")
+                # Sauvegarde locale
+                torch.save(model.state_dict(), save_path / model_name)
+                # Enregistrement MLflow
+                mlflow.pytorch.log_model(model, "pillar_backbone_best_model")
+                print(">>> Meilleur modèle sauvegardé !")
+                
+                
         print(f"training done, saved in: {run_id}")
         
     torch.save(model.state_dict(), save_path / model_name)
     
     
-def run_debug_one_batch(model, loader, optimizer, criterion, device):
-    model.train()
-    model.to(device)
-    # On récupère le premier batch
-    try:
-        batch = next(iter(loader))
-    except StopIteration:
-        print("Erreur: Le loader est vide.")
-        return
-
-    inputs = batch["inputs"].to(device).float()
-    targets = {
-        "cls": batch["targets"]["cls"].to(device).float(),
-        "reg": batch["targets"]["reg"].to(device).float()
-    }
-    inputs.to(device)
-    print(f"DEBUG: Input shape {inputs.shape} | Target CLS shape {targets['cls'].shape}")
-    
-    for i in range(100):
-        optimizer.zero_grad()
-        
-        # Forward
-        cls_logits, reg_preds = model(inputs)
-        loss, _ = criterion((cls_logits, reg_preds), targets)
-        
-        # Backward
-        loss.backward()
-        
-        # Check gradients (si c'est 0, ton backward est mort)
-        grad_norm = sum(p.grad.detach().abs().sum() for p in model.parameters() if p.grad is not None)
-        
-        optimizer.step()
-        
-        if i % 10 == 0:
-            print(f"Step {i} | Loss: {loss.item():.6f} | Grad Norm: {grad_norm:.4f}")
-            
-# if __name__ == "__main__":
-#     with open("./src/late_fusion/LiDAR/config.yaml", 'r') as f:
-#         config = yaml.safe_load(f)     
-#     criterion = DetectionLoss()
-#     model = PillarBackbone(in_channels=3)  
-#     loader = DataLoader(KittiPillarDataset(config_path="./src/late_fusion/LiDAR/config.yaml", data_dir="./data/kitti_lidar", split='train'), batch_size=2, collate_fn=kitti_collate_fn)
-#     optimizer  = optim.Adam(model.parameters(), lr=config['train_params']['lr'])
-#     try:
-#         run_debug_one_batch(model, loader, optimizer, criterion, torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
-#     except Exception as e:
-#         import traceback
-#         traceback.print_exc()        
             
 if __name__ == "__main__":
     try:

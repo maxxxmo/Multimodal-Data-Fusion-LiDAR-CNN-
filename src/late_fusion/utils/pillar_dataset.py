@@ -8,7 +8,15 @@ import yaml
 import h5py
 
 class KittiPillarDataset(Dataset):
-    def __init__(self, data_dir, config_path, split='train'):
+    def __init__(self, data_dir, config_path, split='train', anchor_gen=None, target_assigner=None):
+        
+        
+        self.anchor_gen = anchor_gen
+        self.target_assigner = target_assigner
+        
+        
+        
+        
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         self.dataset_config = self.config['dataset']
@@ -31,10 +39,7 @@ class KittiPillarDataset(Dataset):
             self.file_list = []
             print(f"❌ ERREUR : Chemin introuvable -> {self.lidar_path}")
             
-    def _open_h5(self):
-        """Open HDF5 file if not already open (lazy loading)"""
-        if self.h5_file is None:
-            self.h5_file = h5py.File(self.h5_path, 'r')
+            
             
     def __len__(self):
         return len(self.file_list)
@@ -112,17 +117,31 @@ class KittiPillarDataset(Dataset):
         return pseudo_image
 
 
-    
     def __getitem__(self, idx):
-        if self.h5_file is None:
-            self.h5_file = h5py.File(self.h5_path, 'r')
+            # 1. Gestion de l'ouverture du fichier H5 (sécurisé)
+            if self.h5_file is None:
+                self.h5_file = h5py.File(self.h5_path, 'r')
+                
+            file_id = self.file_list[idx]
+            group = self.h5_file[str(file_id)]
             
-        file_id = self.file_list[idx]
-        group = self.h5_file[str(file_id)]
-        
-        return  {
-            "input": torch.from_numpy(group['pseudo_image'][:]),
-            "target": torch.from_numpy(group['labels'][:]),
-            "id": file_id
-        }
+            # 2. Chargement des données brutes
+            # Assure-toi que ces clés correspondent à ton fichier H5
+            input_data = torch.from_numpy(group['pseudo_image'][:]).float()
+            target_data = torch.from_numpy(group['labels'][:])
+            
+            # 3. Assignation à la volée
+            # On passe les ancres et les labels récupérés
+            cls_t, reg_t, mask = self.target_assigner.assign(self.anchor_gen.anchors, target_data)
+            
+            # 4. Retourne la structure attendue
+            return {
+                'id': file_id,
+                'inputs': input_data,
+                'targets': {
+                    'cls': cls_t.float(), 
+                    'reg': reg_t.float()
+                },
+                'pos_mask': mask.to(torch.uint8)
+            }
     

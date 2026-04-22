@@ -216,6 +216,7 @@ So i directly switch to an anchor based model.
 - [ late fusion medium](https://medium.com/@raj.pulapakura/multimodal-models-and-fusion-a-complete-guide-225ca91f6861#ea9c)
 - [anchors?](https://arxiv.org/pdf/2211.06108)
 - [Point Pillar](https://arxiv.org/pdf/1812.05784)
+- [matching by IOU](https://pyimagesearch.com/2016/11/07/intersection-over-union-iou-for-object-detection/)
 - >@article{Zhou2018,
    author  = {Qian-Yi Zhou and Jaesik Park and Vladlen Koltun},
    title   = {{Open3D}: {A} Modern Library for {3D} Data Processing},
