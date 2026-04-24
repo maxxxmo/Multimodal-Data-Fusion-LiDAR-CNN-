@@ -33,7 +33,6 @@ class KittiPillarDataset(Dataset):
             print(f"❌ ERREUR : Chemin introuvable -> {self.lidar_path}")
             
     def __getstate__(self):
-        # On ne veut pas sérialiser (copier) le pointeur du fichier vers les workers
         state = self.__dict__.copy()
         state['h5_file'] = None
         return state

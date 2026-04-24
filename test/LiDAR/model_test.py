@@ -4,7 +4,7 @@ import numpy as np
 from pathlib import Path
 import h5py
 from src.late_fusion.utils.pillar_dataset import KittiPillarDataset 
-from src.late_fusion.LiDAR.pillarbackbone3 import PillarBackbone
+from late_fusion.LiDAR.model.pillarbackbone3 import PillarBackbone
 from src.late_fusion.LiDAR.anchors import TargetAssigner, AnchorGenerator
 from src.late_fusion.LiDAR.inference import visualize_boxes_on_pseudo_image, get_detected_boxes
 
