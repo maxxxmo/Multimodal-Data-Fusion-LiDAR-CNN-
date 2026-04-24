@@ -1,16 +1,16 @@
 dataset:
-  pc_range: [0, -39.68, -3, 69.12, 39.68, 1]
+  pc_range: [0, -39.68, -3, 69.12, 39.68, 1] #[min_x, min_y, min_z, max_x, max_y, max_z]
   grid_size: [432, 496]
   data_path: "./data/kitti_lidar"
   num_channels: 3
 train_params:
   workers: 2         
   batch: 16         
-  epochs: 10
+  epochs: 50
   optimizer: "AdamW"
   lr: 0.0001       
   weight_decay: 0.01  
-  patience: 10        
+  patience: 20       
   save: True          
   cache: True   
   exist_ok: True

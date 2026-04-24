@@ -2,7 +2,6 @@ import os
 import yaml
 import datetime
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import mlflow
 from torch.utils.data import DataLoader
@@ -10,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from torchmetrics.classification import BinaryPrecision, BinaryRecall
 
-from src.late_fusion.LiDAR.anchors import AnchorGenerator, TargetAssigner, encode_targets
+from src.late_fusion.LiDAR.anchors import AnchorGenerator, TargetAssigner
 from src.late_fusion.utils.pillar_dataset import KittiPillarDataset
 from src.late_fusion.LiDAR.pillarbackbone3 import PillarBackbone
 from src.late_fusion.LiDAR.anchorloss import AnchorDetectionLoss as DetectionLoss
@@ -55,17 +54,20 @@ def validate(model, loader, criterion, device, precision_metric, recall_metric):
     with torch.no_grad():
         for batch in loader:
             inputs = batch["inputs"].to(device).float()
+            
+            
+            
             cls_target = batch["targets"]["cls"].to(device).float()
-            cls_target[cls_target == -1] = 0
-
+            cls_target[cls_target == -1] = 1
             reg_target = batch["targets"]["reg"].to(device).float()
             pos_mask = batch["pos_mask"].to(device).bool()
             
             cls_logits, reg_preds = model(inputs)
-            loss = criterion(cls_logits, reg_preds, cls_target, reg_target, pos_mask)
+            loss = criterion(cls_logits, reg_preds, cls_target, reg_target,pos_mask)
             
             # Calcul des métriques
             probs = torch.sigmoid(cls_logits)
+            print(f"Proba Max: {probs.max().item():.4f} | Proba Moyenne: {probs.mean().item():.6f}")
             precision_metric(probs, cls_target)
             recall_metric(probs, cls_target)
             
@@ -83,7 +85,6 @@ def train_one_epoch(model, loader, optimizer, criterion, device, scaler):
     model.train()
     epoch_loss = 0.0
     
-    # On itère avec un tqdm pour suivre la progression en temps réel
     for i, batch in enumerate(loader):
         inputs = batch["inputs"].to(device).float()
         cls_target = batch["targets"]["cls"].to(device).float()
@@ -95,7 +96,7 @@ def train_one_epoch(model, loader, optimizer, criterion, device, scaler):
         # 1. Utilisation du Mixed Precision (autocast)
         with torch.amp.autocast('cuda'):
             cls_logits, reg_preds = model(inputs)
-            loss = criterion(cls_logits, reg_preds, cls_target, reg_target, pos_mask)
+            loss = criterion(cls_logits, reg_preds, cls_target, reg_target,pos_mask)
         
         # 2. Scaler pour éviter les underflows de gradient (Float16)
         scaler.scale(loss).backward()
@@ -122,8 +123,8 @@ def run_train(config_path="./src/late_fusion/LiDAR/config.yaml"):
     mlflow_path = os.path.join(project_root, "mlruns")
     mlflow.set_tracking_uri(f"file:///{mlflow_path.replace(os.sep, '/')}")
     
-    precision_metric = BinaryPrecision(threshold=0.8).to(device)
-    recall_metric = BinaryRecall(threshold=0.8).to(device)
+    precision_metric = BinaryPrecision(threshold=0.3).to(device)
+    recall_metric = BinaryRecall(threshold=0.3).to(device)
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration non trouvée : {config_path}")
 
@@ -145,20 +146,18 @@ def run_train(config_path="./src/late_fusion/LiDAR/config.yaml"):
 
     anchor_gen = AnchorGenerator(
         feature_map_size=(H, W), 
-        # anchor_sizes=[[3.9, 1.6, 1.56], [0.8, 0.6, 1.73]],  # TO DO , put in the YAML config
-        # anchor_rotations=[0, np.pi/2],  # TO DO , put in the YAML config
         anchor_sizes=[[3.9, 1.6, 1.56]] , # TO DO , put in the YAML config
         anchor_rotations=[0], # TO DO , put in the YAML config
         pc_range=pc_range
     )
-    target_assigner = TargetAssigner(iou_thresholds=(0.6, 0.8))
+    target_assigner = TargetAssigner(iou_thresholds=(0.3, 0.5))
     
 
     dataset = KittiPillarDataset(config_path= "./src/late_fusion/LiDAR/config.yaml", data_dir="./data/kitti_lidar", split='train',anchor_gen=anchor_gen,target_assigner=target_assigner)
-    loader = DataLoader(dataset, batch_size=config['train_params']['batch'], shuffle=True, num_workers=0,pin_memory=False)
+    loader = DataLoader(dataset, batch_size=config['train_params']['batch'], shuffle=True, num_workers=2,prefetch_factor=1,persistent_workers=True,pin_memory=False)
 
     val_dataset = KittiPillarDataset(config_path=config_path, data_dir="./data/kitti_lidar", split='val',anchor_gen=anchor_gen,target_assigner=target_assigner)
-    val_loader = DataLoader(val_dataset, batch_size=config['train_params']['batch'], num_workers=0,pin_memory=False)
+    val_loader = DataLoader(val_dataset, batch_size=config['train_params']['batch'], num_workers=2,prefetch_factor=1,persistent_workers=True,pin_memory=False)
     
     num_types = len([[3.9, 1.6, 1.56]])       
     num_rots = len([0])

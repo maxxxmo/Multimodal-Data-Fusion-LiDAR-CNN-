@@ -200,6 +200,8 @@ The issue was
 
 So i directly switch to an anchor based model.
 
+Then i realized right and left were reversed thanks to the small apendice in front of the LiDAR and the car in diagonal
+![alt text](image.png)
 ## 3.3 Fusion
 
 

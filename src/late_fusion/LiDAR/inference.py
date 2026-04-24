@@ -1,4 +1,7 @@
 import torch
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import numpy as np
 def decode_boxes(anchors, deltas):
     """
     anchors: (N, 7) [x, y, z, w, l, h, theta]
@@ -15,7 +18,7 @@ def decode_boxes(anchors, deltas):
     # 3. Inversion dimensions (w, l, h)
     res_w = torch.exp(deltas[:, 3]) * anchors[:, 3]
     res_l = torch.exp(deltas[:, 4]) * anchors[:, 4]
-    res_h = torch.exp(deltas[:, 5]) * anchors[:, 5]
+    res_h = torch.exp(deltas[:, 5]) * anchors[:, 5] 
     
     # 4. Inversion angle
     res_theta = deltas[:, 6] + anchors[:, 6]
@@ -52,3 +55,60 @@ def get_detected_boxes(cls_logits, reg_preds, anchor_generator, score_thresh=0.5
     pred_boxes = decode_boxes(final_anchors, final_deltas)
     
     return pred_boxes, final_scores
+
+
+def visualize_boxes_on_pseudo_image(pseudo_image, detected_boxes_list, pc_range, grid_size):
+    """
+    pseudo_image: Tenseur (1, C, H, W)
+    detected_boxes_list: Liste de dicts {'box': np.array([x, y, z, w, l, h, rot])}
+    """
+    # 1. Préparation de la carte (H, W)
+    # On affiche la carte telle qu'elle est en mémoire (H, W)
+    feat_map = pseudo_image.squeeze(0).mean(dim=0).cpu().numpy()
+    
+    # 2. Configuration graphique
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+    # origin='lower' place (0,0) en bas à gauche
+    ax.imshow(feat_map, cmap='viridis')
+
+    # 3. Paramètres de projection
+    # pc_range: [x_min, y_min, z_min, x_max, y_max, z_max]
+    x_min, y_min = pc_range[0], pc_range[1]
+    x_max, y_max = pc_range[3], pc_range[4]
+    
+    W, H = grid_size
+    res_x = (x_max - x_min) / W
+    res_y = (y_max - y_min) / H
+    
+    # 4. Dessin des BBoxes
+    for item in detected_boxes_list:
+        box = item['box'] # [x, y, z, w, l, h, rot]
+        cx, cy, w, l, rot = box[0], box[1], box[3], box[4], box[6]
+        
+        # Mapping LiDAR -> Pixel
+        # L'axe X du LiDAR (longitudinal) correspond aux colonnes (W)
+        # L'axe Y du LiDAR (latéral) correspond aux lignes (H)
+        px = (cx - x_min) / res_x
+        # py = (cy - y_min) / res_y
+        py =  (cy - y_min) / res_y
+        pw = w / res_x
+        pl = l / res_y
+        
+        # Rectangle centré en (px, py)
+        rect = patches.Rectangle(
+            (px - pw/2, py - pl/2), 
+            pw, pl, 
+            linewidth=2, edgecolor='red', facecolor='none'
+        )
+
+        # Transformation finale : 
+        # On utilise une rotation positive si le système LiDAR tourne dans le sens inverse 
+        # de l'écran, ou inversement. Ici, on ajuste pour le standard BEV.
+        t = patches.Affine2D().rotate_deg_around(px, py, np.degrees(rot)) + ax.transData
+        rect.set_transform(t)
+        
+        ax.add_patch(rect)
+        ax.scatter(px, py, c='red', s=5)
+
+    ax.set_title("Visualisation des Bounding Boxes Corrigée")
+    plt.show()

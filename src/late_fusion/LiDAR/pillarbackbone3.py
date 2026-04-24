@@ -9,7 +9,7 @@ class FastBlock(nn.Module):
         self.depthwise = nn.Conv2d(in_ch, in_ch, kernel_size=3, padding=1, groups=in_ch)
         self.pointwise = nn.Conv2d(in_ch, out_ch, kernel_size=1)
         self.bn = nn.BatchNorm2d(out_ch)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.LeakyReLU(0.05,inplace=True)
 
     def forward(self, x):
         return self.relu(self.bn(self.pointwise(self.depthwise(x))))
@@ -51,7 +51,7 @@ class PillarBackbone(nn.Module):
         
         # REG : 7 paramètres par ancre [x, y, z, w, l, h, theta]
         self.reg_head = nn.Conv2d(32, self.num_anchors * 7, 1)
-
+        self.scale_reg = nn.Parameter(torch.ones(7))
     def forward(self, x):
         # Encoder
         x1 = self.enc1(x)
@@ -69,5 +69,11 @@ class PillarBackbone(nn.Module):
         u2 = self.up2(x_dec1)
         x_dec2 = self.dec2(torch.cat([u2, x1], dim=1))
         
+        cls_out = self.cls_head(x_dec2)
+        reg_out = self.reg_head(x_dec2)
+        N, C, H, W = reg_out.shape
+        reg_out = reg_out.view(N, self.num_anchors, 7, H, W)
+        reg_out = reg_out * self.scale_reg.view(1, 1, 7, 1, 1)
+        reg_out = reg_out.view(N, C, H, W)
         # Sortie
-        return self.cls_head(x_dec2), self.reg_head(x_dec2)
+        return cls_out, reg_out

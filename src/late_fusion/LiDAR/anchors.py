@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 
+
 class AnchorGenerator:
     def __init__(self, feature_map_size, anchor_sizes, anchor_rotations, pc_range):
         """
@@ -61,64 +62,6 @@ class AnchorGenerator:
         
         print(f"DEBUG: Shape finale des ancres : {all_anchors.shape}")
         return all_anchors
-    # def _generate_anchors(self):
-    #     # 1. Extraction explicite pour éviter l'erreur de mapping
-    #     # pc_range est attendu sous la forme [x_min, y_min, z_min, x_max, y_max, z_max]
-    #     # x_min, y_min, _, x_max, y_max, _ = self.pc_range
-        
-    #     x_min, y_min = self.pc_range[0], self.pc_range[1]
-    #     x_max, y_max = self.pc_range[3], self.pc_range[4]
-        
-    #     print(f"DEBUG: Génération ancres X [{x_min:.2f}, {x_max:.2f}] | Y [{y_min:.2f}, {y_max:.2f}]")
-    #     res_x = (x_max - x_min) / self.W
-    #     res_y = (y_max - y_min) / self.H
-        
-    #     # 3. Appliquer le décalage du demi-voxel
-    #     # On commence au premier centre (x_min + demi_pas) et on finit au dernier
-    #     x_start = x_min + res_x / 2
-    #     x_end = x_max - res_x / 2
-    #     y_start = y_min + res_y / 2
-    #     y_end = y_max - res_y / 2
-        
-        
-    #     # 2. Création des centres avec le bon nombre de points (W pour X, H pour Y)
-    #     x_centers = torch.linspace(x_start, x_end, self.W)
-    #     y_centers = torch.linspace(y_start, y_end, self.H)
-        
-    #     # 3. Meshgrid avec indexing='xy' (plus intuitif pour les coordonnées spatiales)
-    #     # xv: (H, W), yv: (H, W)
-    #     # xv, yv = torch.meshgrid(x_centers, y_centers, indexing='xy')
-                
-                
-    #     xv, yv = torch.meshgrid(x_centers, y_centers, indexing='xy')
-
-    #     # 4. Création de la grille (H, W, 1, 1, 3)
-    #     # On empile les coordonnées et un Z=0 (ou hauteur fixe si besoin)
-    #     print(f"DEBUG: xv unique values: {xv.unique().shape} | yv unique values: {yv.unique().shape}")
-    #     grid = torch.stack([xv, yv, torch.zeros_like(xv)], dim=-1)
-    #     grid = grid.unsqueeze(2).unsqueeze(3) 
-        
-    #     # 5. Gestion des dimensions et rotations (Broadcasting)
-    #     N_types = len(self.anchor_sizes)
-    #     N_rots = len(self.rotations)
-        
-    #     # S'assurer que sizes et rots sont des tenseurs pour le broadcast
-    #     sizes = self.anchor_sizes.view(1, 1, N_types, 1, 3)
-    #     rots = self.rotations.view(1, 1, 1, N_rots, 1)
-        
-    #     # 6. Expansion pour remplir la grille (H, W, N_types, N_rots, 7)
-    #     # Grid est (H, W, 1, 1, 3) -> broadcasté en (H, W, N_types, N_rots, 3)
-    #     grid_expanded = grid.expand(self.H, self.W, N_types, N_rots, 3)
-    #     sizes_expanded = sizes.expand(self.H, self.W, N_types, N_rots, 3)
-    #     rots_expanded = rots.expand(self.H, self.W, N_types, N_rots, 1)
-        
-    #     # 7. Concaténation finale
-    #     # Format: [x, y, z, w, l, h, theta]
-    #     all_anchors = torch.cat([grid_expanded, sizes_expanded, rots_expanded], dim=-1)
-        
-    #     print(f"DEBUG: Shape finale des ancres : {all_anchors.shape}")
-    #     return all_anchors
-        
 
 class TargetAssigner:
     def __init__(self, iou_thresholds=(0.45, 0.6)):

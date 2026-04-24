@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/maxmo/Documents/Max/multimodal_detector/mlruns/429621317766757696/09fc4ea4d6474acdafd2c17a00d19f25/artifacts
+end_time: 1776957829665
+entry_point_name: ''
+experiment_id: '429621317766757696'
+lifecycle_stage: active
+run_id: 09fc4ea4d6474acdafd2c17a00d19f25
+run_name: PillarBackbone_20260423-1658
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1776956340568
+status: 4
+tags: []
+user_id: maxmo
