@@ -213,7 +213,7 @@ With Anchor based detection i will use different anchors placed on my pseudo ima
 
 So i Have 2 classes:
 - AnchorGenerator --> create a grid of anchors
-- TargetAssigner -->
+- TargetAssigner --> Associate ground truth to anchors
 
 
 

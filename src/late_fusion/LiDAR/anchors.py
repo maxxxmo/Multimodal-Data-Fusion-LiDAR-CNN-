@@ -86,20 +86,6 @@ class TargetAssigner:
         H, W, N_t, N_r, _ = anchors.shape
         device = anchors.device
 
-        # =====================================================
-        # INIT
-        # =====================================================
-
-        # -1 = ignore
-        #  0 = negative
-        #  1 = positive
-
-        # labels = torch.full(
-        #     (H, W, N_t, N_r),
-        #     -1,
-        #     dtype=torch.float32,
-        #     device=device
-        # )
         labels = torch.zeros(
             (H, W, N_t, N_r),
             dtype=torch.float32,
@@ -370,93 +356,7 @@ class TargetAssigner:
             iou_matrix[:, j] = inter_area / (union_area + 1e-7)
 
         return iou_matrix
-    # def calculate_iou_bev(self, anchors, gt):
-    #     """
-    #     IoU BEV axis-aligned
-    #     """
-
-    #     a_w = anchors[:, 4]
-    #     a_l = anchors[:, 5]
-
-    #     g_w = gt[:, 4]
-    #     g_l = gt[:, 5]
-
-    #     # -----------------------------------------
-    #     # anchor corners
-    #     # -----------------------------------------
-
-    #     a_x1 = anchors[:, 0] - a_l / 2
-    #     a_x2 = anchors[:, 0] + a_l / 2
-
-    #     a_y1 = anchors[:, 1] - a_w / 2
-    #     a_y2 = anchors[:, 1] + a_w / 2
-
-    #     # -----------------------------------------
-    #     # gt corners
-    #     # -----------------------------------------
-
-    #     g_x1 = gt[:, 0] - g_l / 2
-    #     g_x2 = gt[:, 0] + g_l / 2
-
-    #     g_y1 = gt[:, 1] - g_w / 2
-    #     g_y2 = gt[:, 1] + g_w / 2
-
-    #     # -----------------------------------------
-    #     # intersection
-    #     # -----------------------------------------
-
-    #     inter_w = torch.clamp(
-    #         torch.min(a_x2, g_x2)
-    #         - torch.max(a_x1, g_x1),
-    #         min=0
-    #     )
-
-    #     inter_h = torch.clamp(
-    #         torch.min(a_y2, g_y2)
-    #         - torch.max(a_y1, g_y1),
-    #         min=0
-    #     )
-
-    #     inter = inter_w * inter_h
-
-    #     # -----------------------------------------
-    #     # union
-    #     # -----------------------------------------
-
-    #     area_a = a_w * a_l
-    #     area_g = g_w * g_l
-
-    #     union = area_a + area_g - inter
-
-    #     return inter / (union + 1e-7)
-
-
-
-# def encode_targets(anchors, gt_boxes):
-#     """
-#     anchors: (N, 7)
-#     gt_boxes: (N, 7) - (déjà matchés avec les ancres correspondantes)
-#     """
-#     # Calcul de la diagonale de l'ancre
-#     diagonal = torch.sqrt(anchors[:, 3]**2 + anchors[:, 4]**2)
     
-#     # Encodage (x, y, z)
-#     deltas_x = (gt_boxes[:, 0] - anchors[:, 0]) / diagonal
-#     deltas_y = (gt_boxes[:, 1] - anchors[:, 1]) / diagonal
-#     deltas_z = (gt_boxes[:, 2] - anchors[:, 2]) / anchors[:, 5]
-    
-#     # Encodage (w, l, h)
-#     deltas_w = torch.log(gt_boxes[:, 3] / anchors[:, 3])
-#     deltas_l = torch.log(gt_boxes[:, 4] / anchors[:, 4])
-#     deltas_h = torch.log(gt_boxes[:, 5] / anchors[:, 5])
-    
-#     # Encodage angle
-#     deltas_theta = gt_boxes[:, 6] - anchors[:, 6]
-    
-#     return torch.stack([deltas_x, deltas_y, deltas_z, 
-#                         deltas_w, deltas_l, deltas_h, 
-#                         deltas_theta], dim=1)
-
 def encode_targets(anchors, gt_boxes):
     diagonal = torch.sqrt(anchors[:, 3]**2 + anchors[:, 4]**2)
     
@@ -468,7 +368,7 @@ def encode_targets(anchors, gt_boxes):
     deltas_l = torch.log(gt_boxes[:, 4] / anchors[:, 4])
     deltas_h = torch.log(gt_boxes[:, 5] / anchors[:, 5])
     
-    # --- LA MAGIE EST ICI ---
+
     # Au lieu d'un delta linéaire, on prédit le sinus et le cosinus de la différence
     angle_diff = gt_boxes[:, 6] - anchors[:, 6]
     deltas_sin = torch.sin(angle_diff)
