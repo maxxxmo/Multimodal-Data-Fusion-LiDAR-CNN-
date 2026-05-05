@@ -197,9 +197,9 @@ Step 60 | Pred Mean (dx,dy): -0.0021 | Target Mean (dx,dy): -0.0004
 ```
 
 
-Then i realized right and left were reversed thanks to the small apendice in front of the LiDAR and the car in diagonal
+Then i realized right and left were reversed in my dataset thanks to the small apendice in front of the LiDAR and the car in diagonal
 ![alt text](image.png)
-![prediction on 0001_000010 with 0.35 threshold](image-1.png)
+
 
 
 ### Anchors
@@ -208,18 +208,27 @@ Its too hard for my model to find solutions and coords for the different objects
 On ultralytics i found something that could help me : Anchor based detection
 
 With Anchor based detection i will use different anchors placed on my pseudo image that are the sizes of my objects. The model then just have to predict the offsets between anchors and objects.
+
 ![alt text](image-5.png)
+
+So i Have 2 classes:
+- AnchorGenerator --> create a grid of anchors
+- TargetAssigner -->
+
+
 
 
 
 After a loss modification and a realisation of dimensions missmatch that was breaking everything (w,h) instead of (h,w). Ialso had a mask initialisation issue in generate anchor. Because the pillar dataset is in W,h instead of H, W!!!
 My model starts to learn losses are decreasing and precision improves. But the recall stay low even if when eye tested everything look normal.
+
+![prediction on 0001_000010 with 0.35 threshold](image-1.png)
+
 It's due to the fact that there are prediction in the good zone but they are not good enough.
 
-So using NMS should solve this issue.
 
 
-Before that I need to make the angle prediction. Using only theta it is oftenly 90° off. So i use sin and cos.
+Before that I need to make the angle prediction. Using only theta it is oftenly off. So i use sin and cos. ***(CITE)***
 
 ![alt text](image-2.png)
 Cars are 90° wrong????? whyyyyyy
@@ -227,6 +236,7 @@ ok--> I changed the angle for calculate iou but i forgot to change the anchors g
 --> also had a mistake in display function
 ![alt text](image-3.png)
 
+Now it works I need to evaluate it. I have a lot of prediction at the same places XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX. So using NMS should help me.
 
 ### 3.3.6 Final model Explanation
 The final model is the one from [### 3.2.5 Model & Loss - Iteration 3](#325-model--loss---iteration-3).
