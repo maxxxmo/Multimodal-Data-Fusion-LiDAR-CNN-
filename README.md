@@ -227,7 +227,9 @@ In this final model we have:
     - cls_out : Probability of an object for the Anchor
     - reg_out : Bouding box parameters --> [x, y, z, w, l, h, sin(theta), cos(theta)]
 
-***Schéma***
+![alt text](image-4.png)
+
+It follow a u-net Structure. Using Fastblocks 
 
 In this Diagram Fastblock refers to a custom Block used to optimize the computationnal efficiency.
 ***Fastblock:***
@@ -242,14 +244,18 @@ In this Diagram Fastblock refers to a custom Block used to optimize the computat
 
 So the final goal is to look at each canal separately and then mix the results to be more efficient than a normal convolution by doing 2 cheaper operations.
 
-***Encode***
+***Encoder***
+The goal is to reduce the spatial dimensions (downsampling) and raise channel dimensions to get more Linear combination and a more compact representation of informations
 
 
 ***Bridge***
-
+We dont'have spatial information anymore but we understand more the context. The bridge transform pixels to structures.
 
 ***Decoder***
+No we know there is an object but we dont know where, we need to get back to our spatial representation using upsampling.
 
+***classifiaction initialisation***
+Most of Lidar points are void and not car or people. If we dont iniate it model will start learning with  50% probability of each point being an object. So we want a probability pi of a pixel being an object. We change it to logit and initiate head values.
 
 
 ## 3.3 Fusion

@@ -52,6 +52,7 @@ class PillarBackbone(nn.Module):
         # REG : 7 paramètres par ancre [x, y, z, w, l, h, theta] --> sin and cos
         self.reg_head = nn.Conv2d(32, self.num_anchors * 8, 1)
         self.scale_reg = nn.Parameter(torch.ones(8))
+        
     def forward(self, x):
         # Encoder
         x1 = self.enc1(x)
@@ -74,7 +75,6 @@ class PillarBackbone(nn.Module):
         N, C, H, W = reg_out.shape
         reg_out = reg_out.view(N, self.num_anchors, 8, H, W)
         reg_out = reg_out * self.scale_reg.view(1, 1, 8, 1, 1)
-        # reg_out = reg_out.view(N, C, H, W)
         reg_out = reg_out.view(N, -1, H, W)
         # Sortie
         return cls_out, reg_out
