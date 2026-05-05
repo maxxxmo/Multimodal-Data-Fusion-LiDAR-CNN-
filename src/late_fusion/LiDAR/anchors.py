@@ -4,6 +4,16 @@ import numpy as np
 
 
 class AnchorGenerator:
+    """
+    Docstring for AnchorGenerator
+    
+    :var anchors: Description
+    :var gt_boxes: groiund truth boxes
+    :var gt: ground truth
+    
+    
+    
+    """
     def __init__(self, feature_map_size, anchor_sizes, anchor_rotations, pc_range):
         self.H, self.W = feature_map_size
         # self.W, self.H = feature_map_size
@@ -13,7 +23,10 @@ class AnchorGenerator:
         self.anchors = self._generate_anchors()
         
     def _generate_anchors(self):
-        # 1. Calcul des centres physiques
+        """
+        Create a grid of anchors following config.yaml parameters
+        """
+        # BBOX centers
         x_min, y_min = self.pc_range[0], self.pc_range[1]
         x_max, y_max = self.pc_range[3], self.pc_range[4]
         
@@ -23,30 +36,29 @@ class AnchorGenerator:
         x_centers = torch.linspace(x_min + res_x / 2, x_max - res_x / 2, self.W)
         y_centers = torch.linspace(y_min + res_y / 2, y_max - res_y / 2, self.H)
         
-        # 2. Création de la grille (H, W)
+        # grid (H,W)
         yv, xv = torch.meshgrid(y_centers, x_centers, indexing='ij')
         
         N_types = self.anchor_sizes.shape[0]
         N_rots = self.rotations.shape[0]
         
-        # 3. Initialisation du tenseur 5D (H, W, N_types, N_rots, 7)
+        # Anchors tensor (H, W, N_types, N_rots, 7)
         anchors = torch.zeros((self.H, self.W, N_types, N_rots, 7), dtype=torch.float32)
         
-        # 4. BROADCASTING EXPLICITE
-        # On transforme (H, W) en (H, W, 1, 1) puis on expand vers (H, W, N_types, N_rots)
+        # 4. BROADCASTING FOR EFFICIENCY
+        #  (H, W) to (H, W, 1, 1) the broadcasting to (H, W, N_types, N_rots) 
         xv_exp = xv.unsqueeze(-1).unsqueeze(-1).expand(self.H, self.W, N_types, N_rots)
         yv_exp = yv.unsqueeze(-1).unsqueeze(-1).expand(self.H, self.W, N_types, N_rots)
         
         anchors[..., 0] = xv_exp  # X
         anchors[..., 1] = yv_exp  # Y
-        anchors[..., 2] = -0.7   # Z fixe -1.6 m + taille voiture(1.5)/2 
+        anchors[..., 2] = -0.7   # Z fixed -1.6 m + ((Car height =1.5)/2) 
         
-        # 5. Injection des tailles (w, l, h)
-        # On expand pour correspondre aux N_types
+        # adding sizes
         sizes = self.anchor_sizes.view(1, 1, N_types, 1, 3).expand(self.H, self.W, N_types, N_rots, 3)
         anchors[..., 3:6] = sizes
         
-        # 6. Injection des rotations
+        # adding rotations
         rots = self.rotations.view(1, 1, 1, N_rots).expand(self.H, self.W, N_types, N_rots)
         anchors[..., 6] = rots
         
