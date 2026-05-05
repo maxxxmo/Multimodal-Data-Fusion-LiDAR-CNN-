@@ -218,6 +218,9 @@ Cars are 90° wrong????? whyyyyyy
 ok--> I changed the angle for calculate iou but i forgot to change the anchors generation too
 --> also had a mistake in display function
 ![alt text](image-3.png)
+
+### Anchors
+
 ### 3.3.6 Final model Explanation
 The final model is the one from [### 3.2.5 Model & Loss - Iteration 3](#325-model--loss---iteration-3).
 
@@ -257,6 +260,16 @@ No we know there is an object but we dont know where, we need to get back to our
 ***classifiaction initialisation***
 Most of Lidar points are void and not car or people. If we dont iniate it model will start learning with  50% probability of each point being an object. So we want a probability pi of a pixel being an object. We change it to logit and initiate head values.
 
+### 3.3.7 Final loss Explanation
+Our model has to predict two things cls and reg. Our main issue is class imbalance between void and objects.
+
+We use two concept:
+
+- Focal loss: reduce the impact of easy examples
+
+- Hard negative sampling: We dont take all the negatives samples, we take those the model are not good on. So in the end we only keep positives and part of the negatives.
+
+
 
 ## 3.3 Fusion
 
@@ -273,7 +286,7 @@ Most of Lidar points are void and not car or people. If we dont iniate it model 
 - [Bird Eye View](https://medium.com/@nikitamalviya/birds-eye-view-a-new-perspective-20323ee06fdf)
 - [ late fusion medium](https://medium.com/@raj.pulapakura/multimodal-models-and-fusion-a-complete-guide-225ca91f6861#ea9c)
 - [anchors?](https://arxiv.org/pdf/2211.06108)
-- [Point Pillar](https://arxiv.org/pdf/1812.05784)
+- [PointPillars: Fast Encoders for Object Detection from Point Clouds](https://arxiv.org/pdf/1812.05784)
 - [matching by IOU](https://pyimagesearch.com/2016/11/07/intersection-over-union-iou-for-object-detection/)
 - [torchvision operators](https://docs.pytorch.org/vision/main/ops.html)
 - [convolutions types explanation](https://medium.com/codex/7-different-convolutions-for-designing-cnns-that-will-level-up-your-computer-vision-project-fec588113a64)

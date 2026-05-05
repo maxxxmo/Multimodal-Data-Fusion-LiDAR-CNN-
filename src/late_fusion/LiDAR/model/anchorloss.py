@@ -4,35 +4,24 @@ import torch.nn.functional as F
 
 
 def focal_loss(logits, targets, alpha=0.9, gamma=2.0):
-    """
-    logits  : tensor brut (avant sigmoid)
-    targets : {0, 1}
-    """
-
+    
     targets = targets.float()
-
-    # BCE de base
+    
     bce = F.binary_cross_entropy_with_logits(
         logits,
         targets,
         reduction="none"
     )
-
-    # Probabilités
+    
     probs = torch.sigmoid(logits)
-
-    # p_t
     p_t = probs * targets + (1 - probs) * (1 - targets)
 
-    # Pondération alpha
     alpha_factor = (
         targets * alpha +
         (1 - targets) * (1 - alpha)
     )
 
-    # Focal weighting
     focal_weight = alpha_factor * ((1 - p_t) ** gamma)
-
     loss = focal_weight * bce
 
     return loss.mean()
@@ -68,9 +57,7 @@ class AnchorDetectionLoss(nn.Module):
 
         device = preds_cls.device
 
-        # =====================================================
-        # VALID MASK
-        # =====================================================
+        # Creating masks
 
         valid_mask = (targets_cls != -1)
 
@@ -87,10 +74,8 @@ class AnchorDetectionLoss(nn.Module):
                 requires_grad=True
             )
 
-        # =====================================================
         # HARD NEGATIVE SAMPLING
-        # =====================================================
-
+        
         neg_logits = preds_cls[neg_mask_cls]
 
         neg_losses = F.binary_cross_entropy_with_logits(
@@ -127,9 +112,7 @@ class AnchorDetectionLoss(nn.Module):
             selected_neg_indices[:, 3]
         ] = True
 
-        # =====================================================
-        # FINAL MASK
-        # =====================================================
+        # creating the final mask
 
         final_cls_mask = (
             pos_mask_cls |
@@ -144,9 +127,7 @@ class AnchorDetectionLoss(nn.Module):
             final_cls_mask
         ]
 
-        # =====================================================
-        # CLS LOSS
-        # =====================================================
+        # CLS Loss
 
         cls_loss = focal_loss(
             cls_logits,
@@ -154,9 +135,8 @@ class AnchorDetectionLoss(nn.Module):
             gamma=2.0
         )
         self.cls_loss = cls_loss
-        # =====================================================
-        # REG LOSS
-        # =====================================================
+
+        # REG Loss
 
         reg_mask = (
             pos_mask
@@ -181,21 +161,8 @@ class AnchorDetectionLoss(nn.Module):
         )
         self.reg_loss = reg_loss
         
-        # =====================================================
-        # DEBUG
-        # =====================================================
-
-        # print(
-        #     f"Pos={num_pos.item()} | "
-        #     f"Neg={max_neg} | "
-        #     f"Cls={cls_loss.item():.4f} | "
-        #     f"Reg={reg_loss.item():.4f}"
-        # )
-
-        # =====================================================
-        # TOTAL
-        # =====================================================
-
+        # total loss
+        
         total_loss = (
             self.cls_weight * cls_loss +
             self.reg_weight * reg_loss
