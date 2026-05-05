@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 class FastBlock(nn.Module):
-    """Bloc de base optimisé (Depthwise Separable Convolution)"""
+    """To replace convolution"""
     def __init__(self, in_ch, out_ch):
         super().__init__()
         self.depthwise = nn.Conv2d(in_ch, in_ch, kernel_size=3, padding=1, groups=in_ch)
@@ -17,7 +17,7 @@ class FastBlock(nn.Module):
 class PillarBackbone(nn.Module):
     def __init__(self, in_channels=64, num_anchors=2):
         """
-        in_channels: Nombre de canaux venant du PillarFeatureNet (souvent 64)
+        in_channels
         num_anchors: (len(anchor_sizes) * len(anchor_rotations))
         """
         super().__init__()
@@ -30,26 +30,26 @@ class PillarBackbone(nn.Module):
         self.enc2 = FastBlock(64, 64)
         self.down2 = nn.Conv2d(64, 128, 3, stride=2, padding=1)
         
-        # Bridge
+        # Bridge / backbone
         self.bridge = FastBlock(128, 128)
         
-        # Decoder avec Skip Connections
+        # Decoder 
         self.up1 = nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1)
-        self.dec1 = FastBlock(128, 64) # Concat(64+64)
+        self.dec1 = FastBlock(128, 64) 
         
         self.up2 = nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1)
-        self.dec2 = FastBlock(64, 32) # Concat(32+32)
+        self.dec2 = FastBlock(64, 32) 
         
-        # Têtes : On projette sur num_anchors
-        # CLS : 1 canal par ancre
+        # Heads
+        # CLS 
         self.cls_head = nn.Conv2d(32, self.num_anchors * 1, 1)
         
-        # Initialisation spécifique pour le classifieur (focal loss friendly)
+        # cls_head initalisation
         pi = 0.01
         bias_value = -math.log((1 - pi) / pi)
         nn.init.constant_(self.cls_head.bias, bias_value)
         
-        # REG : 7 paramètres par ancre [x, y, z, w, l, h, theta] --> sin and cos
+        # REG : 8 parameters by achor [x, y, z, w, l, h, sin(theta), cos(theta)] 
         self.reg_head = nn.Conv2d(32, self.num_anchors * 8, 1)
         self.scale_reg = nn.Parameter(torch.ones(8))
         
@@ -70,11 +70,12 @@ class PillarBackbone(nn.Module):
         u2 = self.up2(x_dec1)
         x_dec2 = self.dec2(torch.cat([u2, x1], dim=1))
         
+        # Decision
         cls_out = self.cls_head(x_dec2)
         reg_out = self.reg_head(x_dec2)
         N, C, H, W = reg_out.shape
         reg_out = reg_out.view(N, self.num_anchors, 8, H, W)
         reg_out = reg_out * self.scale_reg.view(1, 1, 8, 1, 1)
         reg_out = reg_out.view(N, -1, H, W)
-        # Sortie
+        
         return cls_out, reg_out
