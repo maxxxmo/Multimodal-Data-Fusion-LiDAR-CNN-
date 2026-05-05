@@ -159,7 +159,7 @@ As there are two heads i need to adapt my loss function:
 - classification head (BCEWithLogitsLoss): Calculated on entire grid: Penalize if the model miss an object or predict a box where there should not be a box
 - Regression head (SmoothL1Loss): Calculated on masked pillars (where an object actually exist): Its like that so the model doesnt learn on empty space.
 
-### 3.25 Model & Loss - Iteration 3
+### 3.2.5 Model & Loss - Iteration 3
 
 ```bash
 Step 140 | Pred Mean (dx,dy): -0.0015 | Target Mean (dx,dy): -0.0001
@@ -202,6 +202,56 @@ So i directly switch to an anchor based model.
 
 Then i realized right and left were reversed thanks to the small apendice in front of the LiDAR and the car in diagonal
 ![alt text](image.png)
+![prediction on 0001_000010 with 0.35 threshold](image-1.png)
+
+After a loss modification and a realisation of dimensions missmatch that was breaking everything (w,h) instead of (h,w). Ialso had a mask initialisation issue in generate anchor. Because the pillar dataset is in W,h instead of H, W!!!
+My model starts to learn losses are decreasing and precision improves. But the recall stay low even if when eye tested everything look normal.
+It's due to the fact that there are prediction in the good zone but they are not good enough.
+
+So using NMS should solve this issue.
+
+
+Before that I need to make the angle prediction. Using only theta it is oftenly 90° off. So i use sin and cos.
+
+![alt text](image-2.png)
+Cars are 90° wrong????? whyyyyyy
+ok--> I changed the angle for calculate iou but i forgot to change the anchors generation too
+--> also had a mistake in display function
+![alt text](image-3.png)
+### 3.3.6 Final model Explanation
+The final model is the one from [### 3.2.5 Model & Loss - Iteration 3](#325-model--loss---iteration-3).
+
+In this final model we have:
+- Input: Pseudo-image
+- Output: 
+    - cls_out : Probability of an object for the Anchor
+    - reg_out : Bouding box parameters --> [x, y, z, w, l, h, sin(theta), cos(theta)]
+
+***Schéma***
+
+In this Diagram Fastblock refers to a custom Block used to optimize the computationnal efficiency.
+***Fastblock:***
+    &rarr; Depthwise Convolution
+    &rarr;Pointwise Convolution (1×1)
+    &rarr;Batch Normalization
+    &rarr;LeakyReLU
+
+***Depthwise convolution***: Each canal is treated independently, one filetr by canal (in normal convolution each output channel is computed from all input channels); It is usefull to extract spatial patterns.
+
+***Point Wise convolution***: It's a 1*1 convolution but it mixes channel
+
+So the final goal is to look at each canal separately and then mix the results to be more efficient than a normal convolution by doing 2 cheaper operations.
+
+***Encode***
+
+
+***Bridge***
+
+
+***Decoder***
+
+
+
 ## 3.3 Fusion
 
 
@@ -219,12 +269,15 @@ Then i realized right and left were reversed thanks to the small apendice in fro
 - [anchors?](https://arxiv.org/pdf/2211.06108)
 - [Point Pillar](https://arxiv.org/pdf/1812.05784)
 - [matching by IOU](https://pyimagesearch.com/2016/11/07/intersection-over-union-iou-for-object-detection/)
+- [torchvision operators](https://docs.pytorch.org/vision/main/ops.html)
+- [convolutions types explanation](https://medium.com/codex/7-different-convolutions-for-designing-cnns-that-will-level-up-your-computer-vision-project-fec588113a64)
 - >@article{Zhou2018,
    author  = {Qian-Yi Zhou and Jaesik Park and Vladlen Koltun},
    title   = {{Open3D}: {A} Modern Library for {3D} Data Processing},
    journal = {arXiv:1801.09847},
    year    = {2018},
 }
+- [u-net](https://arxiv.org/pdf/1505.04597)
 >
 
 

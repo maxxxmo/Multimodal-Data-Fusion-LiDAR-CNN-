@@ -49,9 +49,9 @@ class PillarBackbone(nn.Module):
         bias_value = -math.log((1 - pi) / pi)
         nn.init.constant_(self.cls_head.bias, bias_value)
         
-        # REG : 7 paramètres par ancre [x, y, z, w, l, h, theta]
-        self.reg_head = nn.Conv2d(32, self.num_anchors * 7, 1)
-        self.scale_reg = nn.Parameter(torch.ones(7))
+        # REG : 7 paramètres par ancre [x, y, z, w, l, h, theta] --> sin and cos
+        self.reg_head = nn.Conv2d(32, self.num_anchors * 8, 1)
+        self.scale_reg = nn.Parameter(torch.ones(8))
     def forward(self, x):
         # Encoder
         x1 = self.enc1(x)
@@ -72,8 +72,9 @@ class PillarBackbone(nn.Module):
         cls_out = self.cls_head(x_dec2)
         reg_out = self.reg_head(x_dec2)
         N, C, H, W = reg_out.shape
-        reg_out = reg_out.view(N, self.num_anchors, 7, H, W)
-        reg_out = reg_out * self.scale_reg.view(1, 1, 7, 1, 1)
-        reg_out = reg_out.view(N, C, H, W)
+        reg_out = reg_out.view(N, self.num_anchors, 8, H, W)
+        reg_out = reg_out * self.scale_reg.view(1, 1, 8, 1, 1)
+        # reg_out = reg_out.view(N, C, H, W)
+        reg_out = reg_out.view(N, -1, H, W)
         # Sortie
         return cls_out, reg_out

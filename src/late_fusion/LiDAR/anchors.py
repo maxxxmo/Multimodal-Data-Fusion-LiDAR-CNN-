@@ -2,200 +2,468 @@ import torch
 import numpy as np
 
 
+
 class AnchorGenerator:
     def __init__(self, feature_map_size, anchor_sizes, anchor_rotations, pc_range):
-        """
-        feature_map_size: (H, W)
-        anchor_sizes: liste de [w, l, h] par type d'ancre
-        anchor_rotations: liste des angles (ex: [0, np.pi/2])
-        pc_range: [x_min, y_min, x_max, y_max]
-        """
         self.H, self.W = feature_map_size
-        self.anchor_sizes = torch.tensor(anchor_sizes) # (N_anchors, 3)
-        self.rotations = torch.tensor(anchor_rotations)
+        # self.W, self.H = feature_map_size
+        self.anchor_sizes = torch.tensor(anchor_sizes, dtype=torch.float32)
+        self.rotations = torch.tensor(anchor_rotations, dtype=torch.float32)
         self.pc_range = pc_range
         self.anchors = self._generate_anchors()
-        # print(f"DEBUG ANCHOR: Initialisation avec pc_range={self.pc_range} et feature_map={feature_map_size}")
         
     def _generate_anchors(self):
-        # 1. Extraction des bornes
+        # 1. Calcul des centres physiques
         x_min, y_min = self.pc_range[0], self.pc_range[1]
         x_max, y_max = self.pc_range[3], self.pc_range[4]
         
-        # 2. Calcul des centres avec décalage de demi-voxel
         res_x = (x_max - x_min) / self.W
         res_y = (y_max - y_min) / self.H
         
         x_centers = torch.linspace(x_min + res_x / 2, x_max - res_x / 2, self.W)
         y_centers = torch.linspace(y_min + res_y / 2, y_max - res_y / 2, self.H)
         
-        # 3. Meshgrid : xv (H, W), yv (H, W)
-        xv, yv = torch.meshgrid(x_centers, y_centers, indexing='xy')
+        # 2. Création de la grille (H, W)
+        yv, xv = torch.meshgrid(y_centers, x_centers, indexing='ij')
         
-        # 4. Préparation des dimensions pour le broadcasting
-        # On ajoute des dimensions pour atteindre (H, W, 1, 1, 1)
-        x_grid = xv.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-        y_grid = yv.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-        z_grid = torch.full_like(x_grid, -1.0) # Hauteur Z fixe (ex: -1m)
-
-        # 5. Préparation des dimensions pour sizes et rotations
-        # sizes: (1, 1, N_types, 1, 3) -> W, L, H
-        # rots: (1, 1, 1, N_rots, 1)
-        sizes = self.anchor_sizes.view(1, 1, -1, 1, 3)
-        rots = self.rotations.view(1, 1, 1, -1, 1)
-
-        # 6. Expansion broadcastée
-        # Toutes les dimensions deviennent (H, W, N_types, N_rots, dim)
-        x_exp = x_grid.expand(self.H, self.W, len(self.anchor_sizes), len(self.rotations), 1)
-        y_exp = y_grid.expand(self.H, self.W, len(self.anchor_sizes), len(self.rotations), 1)
-        z_exp = z_grid.expand(self.H, self.W, len(self.anchor_sizes), len(self.rotations), 1)
+        N_types = self.anchor_sizes.shape[0]
+        N_rots = self.rotations.shape[0]
         
-        # On extrait W, L, H depuis sizes
-        w_exp = sizes[..., 0].unsqueeze(-1).expand(self.H, self.W, -1, len(self.rotations), 1)
-        l_exp = sizes[..., 1].unsqueeze(-1).expand(self.H, self.W, -1, len(self.rotations), 1)
-        h_exp = sizes[..., 2].unsqueeze(-1).expand(self.H, self.W, -1, len(self.rotations), 1)
-        rot_exp = rots.expand(self.H, self.W, len(self.anchor_sizes), -1, 1)
-
-        # 7. Concaténation finale
-        # all_anchors: (H, W, N_types, N_rots, 7)
-        all_anchors = torch.cat([x_exp, y_exp, z_exp, w_exp, l_exp, h_exp, rot_exp], dim=-1)
+        # 3. Initialisation du tenseur 5D (H, W, N_types, N_rots, 7)
+        anchors = torch.zeros((self.H, self.W, N_types, N_rots, 7), dtype=torch.float32)
         
-        print(f"DEBUG: Shape finale des ancres : {all_anchors.shape}")
-        return all_anchors
+        # 4. BROADCASTING EXPLICITE
+        # On transforme (H, W) en (H, W, 1, 1) puis on expand vers (H, W, N_types, N_rots)
+        xv_exp = xv.unsqueeze(-1).unsqueeze(-1).expand(self.H, self.W, N_types, N_rots)
+        yv_exp = yv.unsqueeze(-1).unsqueeze(-1).expand(self.H, self.W, N_types, N_rots)
+        
+        anchors[..., 0] = xv_exp  # X
+        anchors[..., 1] = yv_exp  # Y
+        anchors[..., 2] = -0.7   # Z fixe -1.6 m + taille voiture(1.5)/2 
+        
+        # 5. Injection des tailles (w, l, h)
+        # On expand pour correspondre aux N_types
+        sizes = self.anchor_sizes.view(1, 1, N_types, 1, 3).expand(self.H, self.W, N_types, N_rots, 3)
+        anchors[..., 3:6] = sizes
+        
+        # 6. Injection des rotations
+        rots = self.rotations.view(1, 1, 1, N_rots).expand(self.H, self.W, N_types, N_rots)
+        anchors[..., 6] = rots
+        
+        return anchors
+
 
 class TargetAssigner:
-    def __init__(self, iou_thresholds=(0.45, 0.6)):
-        self.neg_thresh = iou_thresholds[0]
-        self.pos_thresh = iou_thresholds[1]
-        
-    def calculate_iou_3d(self, anchors, gt_boxes):
-        """
-        Calcul de l'IoU BEV entre les ancres et les GT.
-        anchors: (N, 7) [x, y, z, w, l, h, theta]
-        gt_boxes: (M, 7) [x, y, z, w, l, h, theta]
-        """
-        # 1. Extraire les coordonnées BEV (x, y, w, l)
-        # On ignore Z, H et Theta pour le moment (calcul "axis-aligned")
-        a_x1 = anchors[:, 0] - anchors[:, 3] / 2
-        a_y1 = anchors[:, 1] - anchors[:, 4] / 2
-        a_x2 = anchors[:, 0] + anchors[:, 3] / 2
-        a_y2 = anchors[:, 1] + anchors[:, 4] / 2
-        
-        g_x1 = gt_boxes[:, 0] - gt_boxes[:, 3] / 2
-        g_y1 = gt_boxes[:, 1] - gt_boxes[:, 4] / 2
-        g_x2 = gt_boxes[:, 0] + gt_boxes[:, 3] / 2
-        g_y2 = gt_boxes[:, 1] + gt_boxes[:, 4] / 2
-        
-        # 2. Calculer les dimensions de l'intersection
-        # On utilise broadcasting pour comparer chaque ancre (N) avec chaque GT (M)
-        # Shape finale (N, M)
-        inter_x1 = torch.max(a_x1.unsqueeze(1), g_x1.unsqueeze(0))
-        inter_y1 = torch.max(a_y1.unsqueeze(1), g_y1.unsqueeze(0))
-        inter_x2 = torch.min(a_x2.unsqueeze(1), g_x2.unsqueeze(0))
-        inter_y2 = torch.min(a_y2.unsqueeze(1), g_y2.unsqueeze(0))
-        
-        inter_w = torch.clamp(inter_x2 - inter_x1, min=0)
-        inter_h = torch.clamp(inter_y2 - inter_y1, min=0)
-        inter_area = inter_w * inter_h
-        
-        # 3. Calculer les aires et l'Union
-        area_a = (a_x2 - a_x1) * (a_y2 - a_y1)
-        area_g = (g_x2 - g_x1) * (g_y2 - g_y1)
-        
-        # Union = AreaA + AreaG - Intersection
-        union_area = area_a.unsqueeze(1) + area_g.unsqueeze(0) - inter_area
-        
-        # 4. IoU final
-        return inter_area / (union_area + 1e-7)
-   
+
+    def __init__(
+        self,
+        iou_thresholds=(0.2, 0.45),
+        pc_range=None
+    ):
+
+        self.neg_thresh, self.pos_thresh = iou_thresholds
+        self.pc_range = pc_range
+    
+    
     def assign(self, anchors, gt_boxes):
         """
-        anchors: [H, W, N_types, N_rots, 7]
+        anchors : [H, W, N_types, N_rots, 7]
         gt_boxes: [M, 7]
         """
-        if gt_boxes.numel() == 0:
-            H, W, N_types, N_rots, _ = anchors.shape
-            num_anchors = N_types * N_rots
-            # Retourner des labels à -1 (background/ignore) et des targets vides
-            labels = torch.full((num_anchors, H, W), -1, device=anchors.device)
-            reg_targets = torch.zeros((num_anchors * 7, H, W), device=anchors.device)
-            pos_mask = torch.zeros((num_anchors, H, W), dtype=torch.bool, device=anchors.device)
-            return labels, reg_targets, pos_mask
-            
-        H, W, N_types, N_rots, _ = anchors.shape
-        num_anchors = N_types * N_rots
-        
-        # 1. Aplatir les ancres pour le calcul IoU
-        # On passe de (H, W, N_types, N_rots, 7) à (N_total, 7)
-        anchors_flat = anchors.view(-1, 7)
-        
-        # 2. Calcul IoU (N_total, M)
-        iou_matrix = self.calculate_iou_3d(anchors_flat, gt_boxes)
 
-        # Après : iou_matrix = self.calculate_iou_3d(anchors_flat, gt_boxes)
-        # print(f"DEBUG: Max IoU dans la matrice : {iou_matrix.max().item():.4f}")
-        # print(f"DEBUG: Anchors Shape: {anchors_flat.shape} | GT Shape: {gt_boxes.shape}")
+        H, W, N_t, N_r, _ = anchors.shape
+        device = anchors.device
 
-        # Si le Max IoU est très bas, vérifions la première ancre et le premier GT
-        # if iou_matrix.max() < 0.01:
-        #     print(f"ANCRE EXEMPLE : {anchors_flat[0]}") # [x, y, z, w, l, h, theta]
-        #     print(f"GT EXEMPLE     : {gt_boxes[0]}")
-                
-        
-        max_iou, argmax_iou = iou_matrix.max(dim=1)
-        
-        # 3. Initialisation des buffers pour les cibles (format 2D)
-        # On veut (N_anchors_flat, 7) pour le reg et (N_anchors_flat,) pour le cls
-        labels = torch.zeros(anchors_flat.shape[0], device=anchors.device)
-        reg_targets = torch.zeros_like(anchors_flat)
-        pos_mask = (max_iou >= self.pos_thresh)
-        
-        # 4. Encodage des cibles positives
-        if pos_mask.any():
-            pos_anchors = anchors_flat[pos_mask]
-            matched_gt = gt_boxes[argmax_iou[pos_mask]]
-            reg_targets[pos_mask] = encode_targets(pos_anchors, matched_gt)
-            labels[pos_mask] = 1
-        
-        # 5. Gestion des négatifs et ignores
-        labels[(max_iou < self.pos_thresh) & (max_iou >= self.neg_thresh)] = -1 # Ignore
-        
-        # 6. RESHAPE FINAL vers (Channels, H, W)
-        # Format attendu par le réseau: (N_anchors * 7, H, W) pour reg, (N_anchors, H, W) pour cls
-        
-        # Reshape CLS: (H, W, num_anchors) -> (num_anchors, H, W)
-        labels_2d = labels.view(H, W, num_anchors).permute(2, 0, 1)
-        
-        # Reshape REG: (H, W, num_anchors, 7) -> (H, W, num_anchors * 7) -> (num_anchors * 7, H, W)
-        reg_targets_2d = reg_targets.view(H, W, num_anchors * 7).permute(2, 0, 1)
-        
-        # Pos mask pour la loss: (H, W, num_anchors) -> (num_anchors, H, W)
-        pos_mask_2d = pos_mask.view(H, W, num_anchors).permute(2, 0, 1)
-        
-        return labels_2d, reg_targets_2d, pos_mask_2d
+        # =====================================================
+        # INIT
+        # =====================================================
 
+        # -1 = ignore
+        #  0 = negative
+        #  1 = positive
+
+        # labels = torch.full(
+        #     (H, W, N_t, N_r),
+        #     -1,
+        #     dtype=torch.float32,
+        #     device=device
+        # )
+        labels = torch.zeros(
+            (H, W, N_t, N_r),
+            dtype=torch.float32,
+            device=device
+        )
+
+        pos_mask = torch.zeros(
+            (H, W, N_t, N_r),
+            dtype=torch.bool,
+            device=device
+        )
+
+        reg_targets = torch.zeros(
+            (H, W, N_t, N_r, 8),
+            dtype=torch.float32,
+            device=device
+        )
+
+        # =====================================================
+        # GRID RESOLUTION
+        # =====================================================
+
+        res_x = (
+            self.pc_range[3] - self.pc_range[0]
+        ) / W
+
+        res_y = (
+            self.pc_range[4] - self.pc_range[1]
+        ) / H
+
+        # =====================================================
+        # LOOP GT
+        # =====================================================
+
+        for gt in gt_boxes:
+
+            # -------------------------------------------------
+            # GT -> GRID
+            # -------------------------------------------------
+
+            u = int(torch.clamp(
+                ((gt[0] - self.pc_range[0]) / res_x),
+                0,
+                W - 1
+            ))
+
+            v = int(torch.clamp(
+                ((gt[1] - self.pc_range[1]) / res_y),
+                0,
+                H - 1
+            ))
+
+            # -------------------------------------------------
+            # LOCAL WINDOW
+            # -------------------------------------------------
+
+            v_start = max(0, v - 2)
+            v_end = min(H, v + 3)
+
+            u_start = max(0, u - 2)
+            u_end = min(W, u + 3)
+
+            local_anchors = anchors[
+                v_start:v_end,
+                u_start:u_end,
+                :,
+                :,
+                :
+            ]
+
+            local_shape = local_anchors.shape
+
+            anchors_flat = local_anchors.reshape(-1, 7)
+
+            # -------------------------------------------------
+            # IOU
+            # -------------------------------------------------
+
+            ious = self.calculate_iou_bev(
+                anchors_flat,
+                gt.unsqueeze(0)
+            ).squeeze(-1)
+
+            # =====================================================
+            # NEGATIVES
+            # =====================================================
+
+            negative_indices = (
+                ious < self.neg_thresh
+            ).nonzero(as_tuple=False)
+
+            for idx_tensor in negative_indices:
+
+                flat_idx = idx_tensor.item()
+
+                idx_v = flat_idx // (
+                    local_shape[1]
+                    * local_shape[2]
+                    * local_shape[3]
+                )
+
+                rem = flat_idx % (
+                    local_shape[1]
+                    * local_shape[2]
+                    * local_shape[3]
+                )
+
+                idx_u = rem // (
+                    local_shape[2]
+                    * local_shape[3]
+                )
+
+                rem = rem % (
+                    local_shape[2]
+                    * local_shape[3]
+                )
+
+                idx_t = rem // local_shape[3]
+
+                idx_r = rem % local_shape[3]
+
+                v_glob = v_start + idx_v
+                u_glob = u_start + idx_u
+
+                # seulement si pas déjà positif
+                if labels[v_glob, u_glob, idx_t, idx_r] != 1:
+                    labels[v_glob, u_glob, idx_t, idx_r] = 0
+
+            # =====================================================
+            # POSITIVES
+            # =====================================================
+
+            positive_indices = (
+                ious > self.pos_thresh
+            ).nonzero(as_tuple=False)
+
+            # -------------------------------------------------
+            # SAFETY POSITIVE
+            # -------------------------------------------------
+
+            if len(positive_indices) == 0:
+
+                best_idx = torch.argmax(ious)
+
+                if ious[best_idx] > 0.25:
+                    positive_indices = torch.tensor(
+                        [[best_idx]],
+                        device=device
+                    )
+
+            # =====================================================
+            # ASSIGN POSITIVES
+            # =====================================================
+
+            for idx_tensor in positive_indices:
+
+                flat_idx = idx_tensor.item()
+
+                idx_v = flat_idx // (
+                    local_shape[1]
+                    * local_shape[2]
+                    * local_shape[3]
+                )
+
+                rem = flat_idx % (
+                    local_shape[1]
+                    * local_shape[2]
+                    * local_shape[3]
+                )
+
+                idx_u = rem // (
+                    local_shape[2]
+                    * local_shape[3]
+                )
+
+                rem = rem % (
+                    local_shape[2]
+                    * local_shape[3]
+                )
+
+                idx_t = rem // local_shape[3]
+
+                idx_r = rem % local_shape[3]
+
+                v_glob = v_start + idx_v
+                u_glob = u_start + idx_u
+
+                # positive
+                labels[
+                    v_glob,
+                    u_glob,
+                    idx_t,
+                    idx_r
+                ] = 1
+
+                pos_mask[
+                    v_glob,
+                    u_glob,
+                    idx_t,
+                    idx_r
+                ] = True
+
+                # regression target
+
+                anchor = anchors[
+                    v_glob,
+                    u_glob,
+                    idx_t,
+                    idx_r
+                ].unsqueeze(0)
+
+                encoded = encode_targets(
+                    anchor,
+                    gt.unsqueeze(0)
+                ).squeeze(0)
+
+                reg_targets[
+                    v_glob,
+                    u_glob,
+                    idx_t,
+                    idx_r
+                ] = encoded
+        return labels, reg_targets, pos_mask
     
+
+    def calculate_iou_bev(self, anchors, gt):
+        """
+        Calcule l'IoU BEV (2D) entre N ancres et M GT en prenant en compte l'angle.
+        Format attendu pour anchors et gt : [..., 7] -> (x, y, z, w, l, h, theta)
+        """
+        device = anchors.device
+        N, M = anchors.shape[0], gt.shape[0]
+        
+        # 1. Extraction des paramètres BEV pertinents
+        # On utilise l'index 3 pour Width (w) et 4 pour Length (l)
+        a_x, a_y, a_w, a_l, a_theta = anchors[:, 0], anchors[:, 1], anchors[:, 3], anchors[:, 4], anchors[:, 6]
+        g_x, g_y, g_w, g_l, g_theta = gt[:, 0], gt[:, 1], gt[:, 3], gt[:, 4], gt[:, 6]
+
+        iou_matrix = torch.zeros((N, M), device=device)
+
+        for j in range(M):
+            # 2. Différence d'angle relative
+            # On utilise cos/sin absolus pour projeter l'ancre dans le repère du GT
+            delta_theta = a_theta - g_theta[j]
+            cos_rel = torch.abs(torch.cos(delta_theta))
+            sin_rel = torch.abs(torch.sin(delta_theta))
+            
+            # 3. Calcul des dimensions effectives (projetées)
+            # Imagine l'ombre de l'ancre tournée sur les axes de la voiture GT
+            a_l_eff = a_l * cos_rel + a_w * sin_rel
+            a_w_eff = a_l * sin_rel + a_w * cos_rel
+            
+            # 4. Intersection "Axis-Aligned" dans le repère local du GT
+            dx = torch.abs(a_x - g_x[j])
+            dy = torch.abs(a_y - g_y[j])
+            
+            # chevauchement sur X et Y
+            inter_w = torch.clamp((a_l_eff + g_l[j]) / 2 - dx, min=0)
+            inter_h = torch.clamp((a_w_eff + g_w[j]) / 2 - dy, min=0)
+            
+            inter_area = inter_w * inter_h
+            
+            # 5. Union et IoU
+            area_a = a_w * a_l
+            area_g = g_w[j] * g_l[j]
+            union_area = area_a + area_g - inter_area
+            
+            iou_matrix[:, j] = inter_area / (union_area + 1e-7)
+
+        return iou_matrix
+    # def calculate_iou_bev(self, anchors, gt):
+    #     """
+    #     IoU BEV axis-aligned
+    #     """
+
+    #     a_w = anchors[:, 4]
+    #     a_l = anchors[:, 5]
+
+    #     g_w = gt[:, 4]
+    #     g_l = gt[:, 5]
+
+    #     # -----------------------------------------
+    #     # anchor corners
+    #     # -----------------------------------------
+
+    #     a_x1 = anchors[:, 0] - a_l / 2
+    #     a_x2 = anchors[:, 0] + a_l / 2
+
+    #     a_y1 = anchors[:, 1] - a_w / 2
+    #     a_y2 = anchors[:, 1] + a_w / 2
+
+    #     # -----------------------------------------
+    #     # gt corners
+    #     # -----------------------------------------
+
+    #     g_x1 = gt[:, 0] - g_l / 2
+    #     g_x2 = gt[:, 0] + g_l / 2
+
+    #     g_y1 = gt[:, 1] - g_w / 2
+    #     g_y2 = gt[:, 1] + g_w / 2
+
+    #     # -----------------------------------------
+    #     # intersection
+    #     # -----------------------------------------
+
+    #     inter_w = torch.clamp(
+    #         torch.min(a_x2, g_x2)
+    #         - torch.max(a_x1, g_x1),
+    #         min=0
+    #     )
+
+    #     inter_h = torch.clamp(
+    #         torch.min(a_y2, g_y2)
+    #         - torch.max(a_y1, g_y1),
+    #         min=0
+    #     )
+
+    #     inter = inter_w * inter_h
+
+    #     # -----------------------------------------
+    #     # union
+    #     # -----------------------------------------
+
+    #     area_a = a_w * a_l
+    #     area_g = g_w * g_l
+
+    #     union = area_a + area_g - inter
+
+    #     return inter / (union + 1e-7)
+
+
+
+# def encode_targets(anchors, gt_boxes):
+#     """
+#     anchors: (N, 7)
+#     gt_boxes: (N, 7) - (déjà matchés avec les ancres correspondantes)
+#     """
+#     # Calcul de la diagonale de l'ancre
+#     diagonal = torch.sqrt(anchors[:, 3]**2 + anchors[:, 4]**2)
+    
+#     # Encodage (x, y, z)
+#     deltas_x = (gt_boxes[:, 0] - anchors[:, 0]) / diagonal
+#     deltas_y = (gt_boxes[:, 1] - anchors[:, 1]) / diagonal
+#     deltas_z = (gt_boxes[:, 2] - anchors[:, 2]) / anchors[:, 5]
+    
+#     # Encodage (w, l, h)
+#     deltas_w = torch.log(gt_boxes[:, 3] / anchors[:, 3])
+#     deltas_l = torch.log(gt_boxes[:, 4] / anchors[:, 4])
+#     deltas_h = torch.log(gt_boxes[:, 5] / anchors[:, 5])
+    
+#     # Encodage angle
+#     deltas_theta = gt_boxes[:, 6] - anchors[:, 6]
+    
+#     return torch.stack([deltas_x, deltas_y, deltas_z, 
+#                         deltas_w, deltas_l, deltas_h, 
+#                         deltas_theta], dim=1)
+
 def encode_targets(anchors, gt_boxes):
-    """
-    anchors: (N, 7)
-    gt_boxes: (N, 7) - (déjà matchés avec les ancres correspondantes)
-    """
-    # Calcul de la diagonale de l'ancre
     diagonal = torch.sqrt(anchors[:, 3]**2 + anchors[:, 4]**2)
     
-    # Encodage (x, y, z)
     deltas_x = (gt_boxes[:, 0] - anchors[:, 0]) / diagonal
     deltas_y = (gt_boxes[:, 1] - anchors[:, 1]) / diagonal
     deltas_z = (gt_boxes[:, 2] - anchors[:, 2]) / anchors[:, 5]
     
-    # Encodage (w, l, h)
     deltas_w = torch.log(gt_boxes[:, 3] / anchors[:, 3])
     deltas_l = torch.log(gt_boxes[:, 4] / anchors[:, 4])
     deltas_h = torch.log(gt_boxes[:, 5] / anchors[:, 5])
     
-    # Encodage angle
-    deltas_theta = gt_boxes[:, 6] - anchors[:, 6]
+    # --- LA MAGIE EST ICI ---
+    # Au lieu d'un delta linéaire, on prédit le sinus et le cosinus de la différence
+    angle_diff = gt_boxes[:, 6] - anchors[:, 6]
+    deltas_sin = torch.sin(angle_diff)
+    deltas_cos = torch.cos(angle_diff)
     
-    return torch.stack([deltas_x, deltas_y, deltas_z, 
-                        deltas_w, deltas_l, deltas_h, 
-                        deltas_theta], dim=1)
+    return torch.stack([
+        deltas_x, deltas_y, deltas_z, 
+        deltas_w, deltas_l, deltas_h, 
+        deltas_sin, deltas_cos # 8 paramètres
+    ], dim=1)

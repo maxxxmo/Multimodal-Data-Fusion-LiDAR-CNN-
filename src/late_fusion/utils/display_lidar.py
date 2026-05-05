@@ -5,7 +5,7 @@ import numpy as np
 import open3d as o3d
 from pathlib import Path
 from src.late_fusion.utils.calibration import KittiCalibration
-
+import matplotlib.patches as patches
 
 def visualize_pseudo_image(h5_path, file_id):
     with h5py.File(h5_path, 'r') as f:
@@ -46,7 +46,7 @@ def visualize_lidar_and_bboxes(points, annotations, point_colors=None):
             [np.sin(yaw),  np.cos(yaw), 0],
             [0,            0,           1]
         ])
-        bbox = o3d.geometry.OrientedBoundingBox([x, y, z], rot_matrix, [l, w, h])
+        bbox = o3d.geometry.OrientedBoundingBox([x, y, z], rot_matrix, [w, l, h])
         bbox.color = (1, 0, 0)
         geometries.append(bbox)
         
@@ -75,7 +75,8 @@ def debug_alignment(file_id, data_dir, config_path):
             
             loc_lidar = calib.project_rect_to_velo(loc_cam).flatten()
             loc_lidar[2] += h / 2 
-            annotations.append([*loc_lidar, l, w, h, -ry - np.pi / 2])
+            annotations.append([*loc_lidar, l, w, h, -ry + np.pi / 2])
+
 
     # Appel de la fonction de visualisation isolée
     visualize_lidar_and_bboxes(points[:, :3], annotations, point_colors)

@@ -3,8 +3,8 @@ dataset:
   grid_size: [432, 496] #[H,W]
   data_path: "./data/kitti_lidar"
   num_channels: 3
-  anchor_sizes: [[3.9, 1.6, 1.56]] 
-  anchor_rotations: [0]
+  anchor_sizes: [[4.4, 1.8, 1.5]] 
+  anchor_rotations: [0, 1.57]
 train_params:
   workers: 2         
   batch: 16         

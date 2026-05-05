@@ -4,24 +4,22 @@ import numpy as np
 from pathlib import Path
 import h5py
 from src.late_fusion.utils.pillar_dataset import KittiPillarDataset 
-from late_fusion.LiDAR.model.pillarbackbone3 import PillarBackbone
+from src.late_fusion.LiDAR.model.pillarbackbone3 import PillarBackbone
 from src.late_fusion.LiDAR.anchors import TargetAssigner, AnchorGenerator
-from src.late_fusion.LiDAR.inference import visualize_boxes_on_pseudo_image, get_detected_boxes
-
-
-from test.LiDAR.test_label_calibration import visualize_lidar_and_bboxes, get_color_map
+from src.late_fusion.LiDAR.inference import get_detected_boxes
+from src.late_fusion.utils.display_lidar import get_color_map
+from src.late_fusion.utils.display_lidar import visualize_lidar_and_bboxes
 
 # --- CONFIGURATION ---
 CONFIG_PATH = "./src/late_fusion/LiDAR/config.yaml"
 DATA_DIR = "./data/kitti_lidar"
-MODEL_PATH = Path("./mlruns/429621317766757696/models/m-35d124cbb3064eb09864b4d77b3304a2/artifacts/data/model.pth")
+MODEL_PATH = Path("./mlruns/429621317766757696/models/m-3476de56f923442e86650d04c6287326/artifacts/data/model.pth")
 CONFIDENCE_THRESHOLD = 0.5
 BATCH_SIZE = 1 
-num_types = len([[3.9, 1.6, 1.56]])       
-num_rots = len([0])
-total_anchors = num_types * num_rots 
-split_eval = 'train'
-id = "0001_000010"
+
+
+split_eval = 'val'
+id = "0014_000089"
 def run_inference(pattern, split=split_eval):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"🚀 Inférence sur : {device}")
@@ -32,17 +30,17 @@ def run_inference(pattern, split=split_eval):
     # 1. Initialisation des composants
     anchor_gen = AnchorGenerator(
         feature_map_size=tuple(config['dataset']['grid_size']), 
-        anchor_sizes=[[3.9, 1.6, 1.56]], 
-        anchor_rotations=[0], 
+        anchor_sizes=config['dataset']['anchor_sizes'], 
+        anchor_rotations=config['dataset']['anchor_rotations'], 
         pc_range=config['dataset']['pc_range']
     )
-    
+    total_anchors = len(config['dataset']['anchor_sizes'])*len(config['dataset']['anchor_rotations'])
     dataset = KittiPillarDataset(
         config_path=CONFIG_PATH, 
         data_dir=DATA_DIR, 
         split=split, 
         anchor_gen=anchor_gen, 
-        target_assigner=TargetAssigner(iou_thresholds=(0.3, 0.5))
+        target_assigner=TargetAssigner(iou_thresholds=(0.5, 0.7))
     )
 
     # 2. Résolution de l'indice basé sur le pattern

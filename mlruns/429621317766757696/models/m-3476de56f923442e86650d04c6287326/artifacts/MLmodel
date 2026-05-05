@@ -1,0 +1,23 @@
+artifact_path: file:///C:/Users/maxmo/Documents/Max/multimodal_detector/mlruns/429621317766757696/models/m-3476de56f923442e86650d04c6287326/artifacts
+flavors:
+  python_function:
+    config:
+      device: null
+    data: data
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.pytorch
+    pickle_module_name: mlflow.pytorch.pickle_module
+    python_version: 3.11.9
+  pytorch:
+    code: null
+    model_data: data
+    pytorch_version: 2.11.0+cu126
+mlflow_version: 3.11.1
+model_id: m-3476de56f923442e86650d04c6287326
+model_size_bytes: 1196753
+model_uuid: m-3476de56f923442e86650d04c6287326
+prompts: null
+run_id: 7e4bba39bf0f4cdfa1dc610a8d4ae09d
+utc_time_created: '2026-05-04 16:01:42.084863'

@@ -5,8 +5,10 @@ from pathlib import Path
 import yaml
 import h5py
 
+
+
 class KittiPillarDataset(Dataset):
-    def __init__(self, data_dir, config_path, split='train', anchor_gen=None, target_assigner=None):
+    def __init__(self, data_dir="./data/kitti_lidar", config_path= "./src/late_fusion/LiDAR/config.yaml", split='train', anchor_gen=None, target_assigner=None):
         self.anchor_gen = anchor_gen
         self.target_assigner = target_assigner
         
@@ -56,63 +58,162 @@ class KittiPillarDataset(Dataset):
                 loc_lidar = calib.project_rect_to_velo(loc_cam).flatten() # Cam to LiDAR
                 loc_lidar[2] += h / 2 # BBOX correction, in LiDAR we use the center of the box
                 yaw_lidar = -ry - np.pi / 2 # angle of the object corrected for LiDAR coordinates
-                annotations.append([loc_lidar[0], loc_lidar[1], loc_lidar[2], l, w, h, yaw_lidar])
+                annotations.append([loc_lidar[0], loc_lidar[1], loc_lidar[2], w, l, h, yaw_lidar])
         
         return np.array(annotations, dtype=np.float32)
     
 
     def transform_to_pillars(self, points):
         """
-        Version finalisée : Alignement (3, Y, X) avec normalisation robuste
-        pour une convergence stable des gradients.
-        """
-        pc_range = self.dataset_config['pc_range'] # [x_min, y_min, z_min, x_max, y_max, z_max]
-        grid_size = self.dataset_config['grid_size'] 
+        BEV Pillar encoding cohérent (C, H, W)
 
-        # 1. Filtrage spatial
-        mask = ((points[:, 0] >= pc_range[0]) & (points[:, 0] < pc_range[3]) &
-                (points[:, 1] >= pc_range[1]) & (points[:, 1] < pc_range[4]))
+        - H = axe Y (vertical image)
+        - W = axe X (horizontal image)
+        """
+
+        pc_range = self.dataset_config['pc_range']
+        grid_size = self.dataset_config['grid_size']  # [H, W]
+
+        H, W = grid_size
+
+        # =====================================================
+        # 1. FILTER POINTS
+        # =====================================================
+
+        mask = (
+            (points[:, 0] >= pc_range[0]) & (points[:, 0] < pc_range[3]) &
+            (points[:, 1] >= pc_range[1]) & (points[:, 1] < pc_range[4])
+        )
         points = points[mask]
 
-        res_x = (pc_range[3] - pc_range[0]) / grid_size[0]
-        res_y = (pc_range[4] - pc_range[1]) / grid_size[1]
+        # =====================================================
+        # 2. RESOLUTION
+        # =====================================================
 
-        u = np.clip(((points[:, 0] - pc_range[0]) / res_x).astype(np.int32), 0, grid_size[0] - 1)
-        v = np.clip(((points[:, 1] - pc_range[1]) / res_y).astype(np.int32), 0, grid_size[1] - 1)
+        res_x = (pc_range[3] - pc_range[0]) / W
+        res_y = (pc_range[4] - pc_range[1]) / H
 
-        # 2. Création des maps
-        pseudo_image = np.zeros((3, grid_size[1], grid_size[0]), dtype=np.float32)
-        count_map = np.zeros((grid_size[1], grid_size[0]), dtype=np.float32)
+        # =====================================================
+        # 3. GRID INDEXING (IMPORTANT: u=W, v=H)
+        # =====================================================
 
-        # 3. Remplissage
+        u = np.clip(((points[:, 0] - pc_range[0]) / res_x).astype(np.int32), 0, W - 1)
+        v = np.clip(((points[:, 1] - pc_range[1]) / res_y).astype(np.int32), 0, H - 1)
+
+        # =====================================================
+        # 4. BEV MAP (C, H, W)
+        # =====================================================
+
+        pseudo_image = np.zeros((3, H, W), dtype=np.float32)
+        count_map = np.zeros((H, W), dtype=np.float32)
+
+        # =====================================================
+        # 5. FILLING
+        # =====================================================
+
         for i in range(len(points)):
-            curr_u, curr_v = u[i], v[i]
-            z, intensity = points[i, 2], points[i, 3]
+            uu = u[i]
+            vv = v[i]
 
-            if z > pseudo_image[0, curr_v, curr_u]:
-                pseudo_image[0, curr_v, curr_u] = z
-            
-            pseudo_image[1, curr_v, curr_u] += 1.0 # Nombre de points par pilier
-            pseudo_image[2, curr_v, curr_u] += intensity
-            count_map[curr_v, curr_u] += 1
+            z = points[i, 2]
+            intensity = points[i, 3]
 
-        # 4. Normalisation robuste
+            # max height
+            if z > pseudo_image[0, vv, uu]:
+                pseudo_image[0, vv, uu] = z
+
+            pseudo_image[1, vv, uu] += 1.0
+            pseudo_image[2, vv, uu] += intensity
+            count_map[vv, uu] += 1
+
+        # =====================================================
+        # 6. NORMALIZATION
+        # =====================================================
+
         mask_non_empty = count_map > 0
-        
-        # Canal 0 (Z) : Centré et réduit par la plage [z_min, z_max]
-        z_min, z_max = pc_range[2], pc_range[5]
-        pseudo_image[0, mask_non_empty] = (pseudo_image[0, mask_non_empty] - z_min) / (z_max - z_min)
-        
-        # Canal 1 (Nombre de points) : log-échelle pour éviter les pics extrêmes
-        pseudo_image[1] = np.log1p(pseudo_image[1])
-        
-        # Canal 2 (Intensité) : Moyenne normalisée
-        pseudo_image[2, mask_non_empty] /= count_map[mask_non_empty]
-        pseudo_image[2, mask_non_empty] = np.clip(pseudo_image[2, mask_non_empty] / 255.0, 0, 1)
 
-        # Sécurité finale : aucune valeur infinie ou NaN
+        # --- HEIGHT (centré sol ~ -1.6m)
+        pseudo_image[0, mask_non_empty] = (
+            (pseudo_image[0, mask_non_empty] + 1.6) / 0.5
+        )
+
+        # --- DENSITY (log scale)
+        pseudo_image[1] = np.log1p(pseudo_image[1])
+
+        # --- INTENSITY (robust mean + tanh)
+        pseudo_image[2, mask_non_empty] /= count_map[mask_non_empty]
+        pseudo_image[2, mask_non_empty] = np.tanh(
+            pseudo_image[2, mask_non_empty] / 10.0
+        )
+
+        # =====================================================
+        # 7. SAFETY
+        # =====================================================
+
         return np.nan_to_num(pseudo_image)
-    
+
+
+
+
+
+
+
+    # def transform_to_pillars(self, points):
+    #     """
+    #     Version finalisée : 
+    #     - Z-Score pour la hauteur (centré sur le sol à -1.6m).
+    #     - Log-scale pour la densité (nombre de points).
+    #     - Tanh pour l'intensité (reflet non-linéaire).
+    #     """
+    #     pc_range = self.dataset_config['pc_range'] 
+    #     grid_size = self.dataset_config['grid_size'] 
+
+    #     # 1. Filtrage spatial
+    #     mask = ((points[:, 0] >= pc_range[0]) & (points[:, 0] < pc_range[3]) &
+    #             (points[:, 1] >= pc_range[1]) & (points[:, 1] < pc_range[4]))
+    #     points = points[mask]
+
+    #     res_x = (pc_range[3] - pc_range[0]) / grid_size[0]
+    #     res_y = (pc_range[4] - pc_range[1]) / grid_size[1]
+
+    #     u = np.clip(((points[:, 0] - pc_range[0]) / res_x).astype(np.int32), 0, grid_size[0] - 1)
+    #     v = np.clip(((points[:, 1] - pc_range[1]) / res_y).astype(np.int32), 0, grid_size[1] - 1)
+
+    #     # 2. Création des maps
+    #     pseudo_image = np.zeros((3, grid_size[1], grid_size[0]), dtype=np.float32)
+    #     count_map = np.zeros((grid_size[1], grid_size[0]), dtype=np.float32)
+
+    #     # 3. Remplissage
+    #     # Optimisation : on garde le Z max par pilier
+    #     for i in range(len(points)):
+    #         curr_u, curr_v = u[i], v[i]
+    #         z, intensity = points[i, 2], points[i, 3]
+
+    #         if z > pseudo_image[0, curr_v, curr_u]:
+    #             pseudo_image[0, curr_v, curr_u] = z
+            
+    #         pseudo_image[1, curr_v, curr_u] += 1.0 
+    #         pseudo_image[2, curr_v, curr_u] += intensity
+    #         count_map[curr_v, curr_u] += 1
+
+    #     # 4. Normalisation robuste
+    #     mask_non_empty = count_map > 0
+        
+    #     # Canal 0 (Z) : Z-Score (Centré sur le sol KITTI ~ -1.6m, STD ~ 0.5)
+    #     # Cela permet d'avoir des valeurs centrées autour de 0, idéal pour les CNN
+    #     pseudo_image[0, mask_non_empty] = (pseudo_image[0, mask_non_empty] + 1.6) / 0.5
+        
+    #     # Canal 1 (Nombre de points) : Log-échelle (plus stable que linéaire)
+    #     pseudo_image[1] = np.log1p(pseudo_image[1])
+        
+    #     # Canal 2 (Intensité) : Moyenne normalisée via Tanh
+    #     # Le / 255.0 est souvent trop brutal pour du LiDAR. 
+    #     # La division par 10 + tanh permet de garder la sensibilité aux faibles réflectances
+    #     pseudo_image[2, mask_non_empty] /= count_map[mask_non_empty]
+    #     pseudo_image[2, mask_non_empty] = np.tanh(pseudo_image[2, mask_non_empty] / 10.0)
+
+    #     # Sécurité finale : aucune valeur infinie ou NaN
+    #     return np.nan_to_num(pseudo_image)
     
     def __getitem__(self, idx):
         if self.h5_file is None:
@@ -120,6 +221,8 @@ class KittiPillarDataset(Dataset):
             
         file_id = str(self.file_list[idx])
         group = self.h5_file[file_id]
+        
+        
         
         # Tout est lu au même endroit
         return {
