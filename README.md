@@ -215,9 +215,12 @@ So i Have 2 classes:
 - AnchorGenerator --> create a grid of anchors
 - TargetAssigner --> Associate ground truth to anchors
 
+And functions:
+- calculate_iou_bev --> calculate overlaping between boxes in BEV view. IoU = Area(Intersection) / Area(Union)
+- encode_target --> Transform meters coordinates to relatives in deltas (CITE THETA COS AND SIN)
 
-
-
+Note: I use AABB and not OBB
+![https://madmann91.github.io/2024/02/10/converting-oriented-bounding-boxes-to-axis-aligned-ones.html](image-6.png)
 
 After a loss modification and a realisation of dimensions missmatch that was breaking everything (w,h) instead of (h,w). Ialso had a mask initialisation issue in generate anchor. Because the pillar dataset is in W,h instead of H, W!!!
 My model starts to learn losses are decreasing and precision improves. But the recall stay low even if when eye tested everything look normal.

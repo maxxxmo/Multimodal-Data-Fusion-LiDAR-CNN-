@@ -313,32 +313,29 @@ class TargetAssigner:
 
     def calculate_iou_bev(self, anchors, gt):
         """
-        Calcule l'IoU BEV (2D) entre N ancres et M GT en prenant en compte l'angle.
-        Format attendu pour anchors et gt : [..., 7] -> (x, y, z, w, l, h, theta)
+        Calculate IoU in 2D between N anchors and M GroundTruths 
+        Anchors and GroundTruth are: (x, y, z, w, l, h, theta)
         """
         device = anchors.device
         N, M = anchors.shape[0], gt.shape[0]
         
-        # 1. Extraction des paramètres BEV pertinents
-        # On utilise l'index 3 pour Width (w) et 4 pour Length (l)
+        # Parameters
         a_x, a_y, a_w, a_l, a_theta = anchors[:, 0], anchors[:, 1], anchors[:, 3], anchors[:, 4], anchors[:, 6]
         g_x, g_y, g_w, g_l, g_theta = gt[:, 0], gt[:, 1], gt[:, 3], gt[:, 4], gt[:, 6]
 
         iou_matrix = torch.zeros((N, M), device=device)
 
         for j in range(M):
-            # 2. Différence d'angle relative
-            # On utilise cos/sin absolus pour projeter l'ancre dans le repère du GT
+            # Projecting angle using sin and cos
             delta_theta = a_theta - g_theta[j]
             cos_rel = torch.abs(torch.cos(delta_theta))
             sin_rel = torch.abs(torch.sin(delta_theta))
             
-            # 3. Calcul des dimensions effectives (projetées)
-            # Imagine l'ombre de l'ancre tournée sur les axes de la voiture GT
+            # Projected dimensions
             a_l_eff = a_l * cos_rel + a_w * sin_rel
             a_w_eff = a_l * sin_rel + a_w * cos_rel
             
-            # 4. Intersection "Axis-Aligned" dans le repère local du GT
+            # Intersection calculus
             dx = torch.abs(a_x - g_x[j])
             dy = torch.abs(a_y - g_y[j])
             
@@ -358,12 +355,14 @@ class TargetAssigner:
         return iou_matrix
     
 def encode_targets(anchors, gt_boxes):
+    """Use anchors and gt boxes to create the 8 targets--> (dx, dy, dz, dw, dl, dh, dsin(theta), dcos(theta))"""
     diagonal = torch.sqrt(anchors[:, 3]**2 + anchors[:, 4]**2)
     
     deltas_x = (gt_boxes[:, 0] - anchors[:, 0]) / diagonal
     deltas_y = (gt_boxes[:, 1] - anchors[:, 1]) / diagonal
     deltas_z = (gt_boxes[:, 2] - anchors[:, 2]) / anchors[:, 5]
     
+    # Normalisation 0 to 1
     deltas_w = torch.log(gt_boxes[:, 3] / anchors[:, 3])
     deltas_l = torch.log(gt_boxes[:, 4] / anchors[:, 4])
     deltas_h = torch.log(gt_boxes[:, 5] / anchors[:, 5])
@@ -377,5 +376,5 @@ def encode_targets(anchors, gt_boxes):
     return torch.stack([
         deltas_x, deltas_y, deltas_z, 
         deltas_w, deltas_l, deltas_h, 
-        deltas_sin, deltas_cos # 8 paramètres
+        deltas_sin, deltas_cos # 8 paramters
     ], dim=1)
