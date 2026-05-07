@@ -39,13 +39,22 @@ Velodyn (named velo sometimes) refers to the LiDAR. I will use frames from camer
 From the paper we know:
 ![cord system](images/cord_system.png)
 
-and labels are:
+Labels are:
 
-61 3 Car 1 0 -2.101562 858.090004 200.535261 1241.000000 374.000000 1.377451 1.491847 3.318948 3.256830 1.648443 5.626493 -1.600523
+**Example:** `61 3 Car 1 0 -2.10 858.09 200.53 1241.00 374.00 1.37 1.49 3.31 3.25 1.64 5.62 -1.60`
 
-for
-
-Frame_ID Track_ID Type Truncated Occluded Alpha bbox_left bbox_top bbox_right bbox_bottom Height Width Length Location_X Location_Y Location_Z Rotation_y
+| Field Name | Example Value |
+| :--- | :--- |
+| **Frame_ID** | `61` |
+| **Track_ID** | `3` |
+| **Type** | `Car` |
+| **Truncated** | `1` |
+| **Occluded** | `0` |
+| **Alpha** | `-2.10` |
+| **BBox (Left, Top, Right, Bottom)** | `858.09 200.53 1241.00 374.00` |
+| **Dimensions (Height, Width, Length)** | `1.37 1.49 3.31` |
+| **Location (X, Y, Z)** | `3.25 1.64 5.62` |
+| **Rotation_y** | `-1.60` |
 
 
 The dataset is big i want first to do only the computer vision then to do the LiDAR part alone too. Then i can do both together. To do that and avoid data leakage i will create 2 subdatasets (kitti_lidar & kitti_yolo) but both will be splitted the same:
@@ -193,18 +202,12 @@ Epoch 2/5 - Loss: 0.2825
 Epoch 2/5 - Val Loss: 0.2816
 debug metrics types: train_loss=<class 'float'>, val_loss=<class 'float'>
 Stats cibles: Min=-4.70, Max=1.57
-Step 0 | Pred Mean (dx,dy): -0.0002 | Target Mean (dx,dy): -0.0000
-Stats cibles: Min=-4.27, Max=1.40
-Step 20 | Pred Mean (dx,dy): 0.0016 | Target Mean (dx,dy): -0.0005
-Stats cibles: Min=-4.38, Max=1.51
-Step 40 | Pred Mean (dx,dy): -0.0004 | Target Mean (dx,dy): 0.0016
-Stats cibles: Min=-4.70, Max=1.56
-Step 60 | Pred Mean (dx,dy): -0.0021 | Target Mean (dx,dy): -0.0004
+
 ```
 
 
 Then i realized right and left were reversed in my dataset thanks to the small apendice in front of the LiDAR and the car in diagonal
-![alt text](image.png)
+![label_correction](images/label_correction.png)
 
 
 
@@ -215,7 +218,7 @@ On ultralytics i found something that could help me : Anchor based detection
 
 With Anchor based detection i will use different anchors placed on my pseudo image that are the sizes of my objects. The model then just have to predict the offsets between anchors and objects.
 
-![alt text](image-5.png)
+![Anchors example](images/anchors_example.png)
 
 So i Have 2 classes:
 - AnchorGenerator --> create a grid of anchors
@@ -228,7 +231,7 @@ And functions:
 Note: I use an AABB approximation (Yu Zheng) by projecting the oriented bounding box onto the x/y axes for the intersection computation.
 Instead of computing the exact intersection between two rotated rectangles, I approximate the oriented box with its axis-aligned bounding box (AABB).
 
-![https://madmann91.github.io/2024/02/10/converting-oriented-bounding-boxes-to-axis-aligned-ones.html](image-7.png)
+![https://madmann91.github.io/2024/02/10/converting-oriented-bounding-boxes-to-axis-aligned-ones.html](images/AABB.png)
 
 This projection estimates how much space the rotated rectangle occupies along the x and y axes:
 
@@ -267,7 +270,7 @@ However, this approximation is still efficient because:
 After a loss modification and a realisation of dimensions missmatch that was breaking everything (w,h) instead of (h,w). Ialso had a mask initialisation issue in generate anchor. Because the pillar dataset is in W,h instead of H, W!!!
 My model starts to learn losses are decreasing and precision improves. But the recall stay low even if when eye tested everything look normal.
 
-![prediction on 0001_000010 with 0.35 threshold](image-1.png)
+![prediction on 0001_000010 with 0.35 threshold](images/prediction1_10.png)
 
 It's due to the fact that there are prediction in the good zone but they are not good enough.
 
@@ -275,13 +278,13 @@ It's due to the fact that there are prediction in the good zone but they are not
 
 Before that I need to make the angle prediction. Using only theta it is oftenly off. So i use sin and cos. (PointPillars article)
 
-![alt text](image-2.png)
+![rotated_results](images/rotated_results.png)
 Cars are 90° wrong????? whyyyyyy
 ok--> I changed the angle for calculate iou but i forgot to change the anchors generation too
 --> also had a mistake in display function
-![alt text](image-3.png)
+![alt text](imageS/good_results.png)
 
-Now it works I need to evaluate it. I have a lot of prediction at the same places XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX. So using NMS should help me.
+Now it works I need to evaluate it. I have a lot of prediction at the same places. So using NMS should help me.
 
 ### 3.3.6 Final model Explanation
 The final model is the one from [### 3.2.5 Model & Loss - Iteration 3](#325-model--loss---iteration-3).
@@ -292,7 +295,7 @@ In this final model we have:
     - cls_out : Probability of an object for the Anchor
     - reg_out : Bouding box parameters --> [x, y, z, w, l, h, sin(theta), cos(theta)]
 
-![alt text](image-4.png)
+![alt text](images/diagram_model.png)
 
 It follow a u-net Structure. Using Fastblocks 
 
@@ -331,9 +334,16 @@ We use two concept:
 
 - Hard negative sampling: We dont take all the negatives samples, we take those the model are not good on. So in the end we only keep positives and part of the negatives.
 
+## 3.3 NMS (Non Maxmimum Supression)
 
+NPS is a post processing technique used for cleaning redundancy in object detection.
+![nms](images/nms.png)
 
-## 3.3 Fusion
+Boxes are ranked by descending confidence score. Starting from the best BBOX we compare it's IoU with all remaining boxes and if any box has an IoU>threshold we supress it. Then we iterate with the next highest confidence score until there is no more boxes.
+
+(Pytorch already has an implementation)
+
+## 3.4 Fusion
 
 
 # 4 Middle fusion approach
@@ -368,11 +378,21 @@ We use two concept:
 * [Open3D: A Modern Library for 3D Data Processing](https://arxiv.org/abs/1801.09847)
 * [torchvision operators](https://docs.pytorch.org/vision/main/ops.html)
 
+***NMS***
+* [Learning NMS](https://arxiv.org/abs/1705.02950)
 
-
-## 5.1 Data Sources
+## 5.1 Data 
+Data come from KITTI DATASET
 
 # 6 Future and improvments
+
+- IoU calculus
+- Non Anchor based Model with a better loss
+- Improve computation efficiency
+- More usable code structure
+- ALL Pseudo image are already generated in the model_test i should generate the pseudo image right before inference as it
+should be done in real life conditions
+
 
 # 7 Glossary
 ##### 1 Heads
