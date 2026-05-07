@@ -251,7 +251,9 @@ $$
 and the intersection area is approximated as:
 
 $$
+\begin{aligned}
 \text{inter\_area} = \text{overlap}_x \times \text{overlap}_y
+\end{aligned}
 $$
 
 
