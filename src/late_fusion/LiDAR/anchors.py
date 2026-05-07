@@ -5,18 +5,9 @@ import numpy as np
 
 class AnchorGenerator:
     """
-    Docstring for AnchorGenerator
-    
-    :var anchors: Description
-    :var gt_boxes: groiund truth boxes
-    :var gt: ground truth
-    
-    
-    
     """
     def __init__(self, feature_map_size, anchor_sizes, anchor_rotations, pc_range):
         self.H, self.W = feature_map_size
-        # self.W, self.H = feature_map_size
         self.anchor_sizes = torch.tensor(anchor_sizes, dtype=torch.float32)
         self.rotations = torch.tensor(anchor_rotations, dtype=torch.float32)
         self.pc_range = pc_range
@@ -46,7 +37,7 @@ class AnchorGenerator:
         anchors = torch.zeros((self.H, self.W, N_types, N_rots, 7), dtype=torch.float32)
         
         # 4. BROADCASTING FOR EFFICIENCY
-        #  (H, W) to (H, W, 1, 1) the broadcasting to (H, W, N_types, N_rots) 
+        #  (H, W) to (H, W, 1, 1) then broadcasting to (H, W, N_types, N_rots) 
         xv_exp = xv.unsqueeze(-1).unsqueeze(-1).expand(self.H, self.W, N_types, N_rots)
         yv_exp = yv.unsqueeze(-1).unsqueeze(-1).expand(self.H, self.W, N_types, N_rots)
         
@@ -66,7 +57,9 @@ class AnchorGenerator:
 
 
 class TargetAssigner:
-
+    """
+    Assign GT to Anchor
+    """
     def __init__(
         self,
         iou_thresholds=(0.2, 0.45),
@@ -81,6 +74,13 @@ class TargetAssigner:
         """
         anchors : [H, W, N_types, N_rots, 7]
         gt_boxes: [M, 7]
+        Determinate for each Anchor on the grid if it's 
+        positive --> can predict
+        negative --> predict nothing (background)
+        ignored --> not used for loss calculus
+        
+        It doesnt compare all anchors and GT. For each GT it looks in a 5*5 Anchor Grid Radius
+        If positive we use encode targets to stock deltas
         """
 
         H, W, N_t, N_r, _ = anchors.shape
@@ -104,127 +104,62 @@ class TargetAssigner:
             device=device
         )
 
-        # =====================================================
         # GRID RESOLUTION
-        # =====================================================
+        res_x = (self.pc_range[3] - self.pc_range[0]) / W
+        res_y = (self.pc_range[4] - self.pc_range[1]) / H
 
-        res_x = (
-            self.pc_range[3] - self.pc_range[0]
-        ) / W
-
-        res_y = (
-            self.pc_range[4] - self.pc_range[1]
-        ) / H
-
-        # =====================================================
-        # LOOP GT
-        # =====================================================
-
+        
         for gt in gt_boxes:
+            # Projection of GT in GRID
+            u = int(torch.clamp(((gt[0] - self.pc_range[0]) / res_x),0,W - 1))
+            v = int(torch.clamp(((gt[1] - self.pc_range[1]) / res_y),0,H - 1))
 
-            # -------------------------------------------------
-            # GT -> GRID
-            # -------------------------------------------------
-
-            u = int(torch.clamp(
-                ((gt[0] - self.pc_range[0]) / res_x),
-                0,
-                W - 1
-            ))
-
-            v = int(torch.clamp(
-                ((gt[1] - self.pc_range[1]) / res_y),
-                0,
-                H - 1
-            ))
-
-            # -------------------------------------------------
             # LOCAL WINDOW
-            # -------------------------------------------------
 
             v_start = max(0, v - 2)
             v_end = min(H, v + 3)
-
             u_start = max(0, u - 2)
             u_end = min(W, u + 3)
 
-            local_anchors = anchors[
-                v_start:v_end,
-                u_start:u_end,
-                :,
-                :,
-                :
-            ]
-
+            local_anchors = anchors[v_start:v_end,u_start:u_end,:,:,:] # Anchors within the Window
             local_shape = local_anchors.shape
-
             anchors_flat = local_anchors.reshape(-1, 7)
 
-            # -------------------------------------------------
             # IOU
-            # -------------------------------------------------
+            ious = self.calculate_iou_bev(anchors_flat,gt.unsqueeze(0)).squeeze(-1)
 
-            ious = self.calculate_iou_bev(
-                anchors_flat,
-                gt.unsqueeze(0)
-            ).squeeze(-1)
-
-            # =====================================================
             # NEGATIVES
-            # =====================================================
-
-            negative_indices = (
-                ious < self.neg_thresh
-            ).nonzero(as_tuple=False)
+            negative_indices = (ious < self.neg_thresh).nonzero(as_tuple=False)
 
             for idx_tensor in negative_indices:
-
+                # Local anchor are flattened so we need to find back the indexes of the negative indices
+                # Format of local window before flattening : [H_local, W_local, N_types, N_rots] after flattening [N_total_anchors, 7]
+                # Now we have flat_idx = 73 and we want to find (v=2, u=2, t=0, r=1) 
                 flat_idx = idx_tensor.item()
-
-                idx_v = flat_idx // (
-                    local_shape[1]
-                    * local_shape[2]
-                    * local_shape[3]
-                )
-
-                rem = flat_idx % (
-                    local_shape[1]
-                    * local_shape[2]
-                    * local_shape[3]
-                )
-
-                idx_u = rem // (
-                    local_shape[2]
-                    * local_shape[3]
-                )
-
-                rem = rem % (
-                    local_shape[2]
-                    * local_shape[3]
-                )
-
+                # We have one long dimension we divide to get v, each line is  W_local, N_types, N_rots
+                idx_v = flat_idx // (local_shape[1]* local_shape[2]* local_shape[3])
+                # what remains of the indexe for the other parameters
+                rem = flat_idx % (local_shape[1]* local_shape[2]* local_shape[3])
+                # now u
+                idx_u = rem // (local_shape[2]* local_shape[3])
+                rem = rem % (local_shape[2]* local_shape[3])
+                # now t and r
                 idx_t = rem // local_shape[3]
-
                 idx_r = rem % local_shape[3]
-
+                
+                # we start from the window coordinates
                 v_glob = v_start + idx_v
                 u_glob = u_start + idx_u
 
-                # seulement si pas déjà positif
+                # To not overwrite positives ones
                 if labels[v_glob, u_glob, idx_t, idx_r] != 1:
                     labels[v_glob, u_glob, idx_t, idx_r] = 0
 
-            # =====================================================
             # POSITIVES
-            # =====================================================
 
-            positive_indices = (
-                ious > self.pos_thresh
-            ).nonzero(as_tuple=False)
+            positive_indices = (ious > self.pos_thresh).nonzero(as_tuple=False)
 
-            # -------------------------------------------------
             # SAFETY POSITIVE
-            # -------------------------------------------------
 
             if len(positive_indices) == 0:
 
@@ -236,78 +171,32 @@ class TargetAssigner:
                         device=device
                     )
 
-            # =====================================================
             # ASSIGN POSITIVES
-            # =====================================================
 
             for idx_tensor in positive_indices:
-
                 flat_idx = idx_tensor.item()
-
-                idx_v = flat_idx // (
-                    local_shape[1]
-                    * local_shape[2]
-                    * local_shape[3]
-                )
-
-                rem = flat_idx % (
-                    local_shape[1]
-                    * local_shape[2]
-                    * local_shape[3]
-                )
-
-                idx_u = rem // (
-                    local_shape[2]
-                    * local_shape[3]
-                )
-
-                rem = rem % (
-                    local_shape[2]
-                    * local_shape[3]
-                )
-
+                idx_v = flat_idx // (local_shape[1]* local_shape[2]* local_shape[3])
+                rem = flat_idx % (local_shape[1]* local_shape[2]* local_shape[3])
+                idx_u = rem // (local_shape[2]* local_shape[3])
+                rem = rem % (local_shape[2]* local_shape[3])
                 idx_t = rem // local_shape[3]
-
                 idx_r = rem % local_shape[3]
-
                 v_glob = v_start + idx_v
                 u_glob = u_start + idx_u
 
                 # positive
-                labels[
-                    v_glob,
-                    u_glob,
-                    idx_t,
-                    idx_r
-                ] = 1
+                labels[v_glob,u_glob,idx_t,idx_r] = 1
 
-                pos_mask[
-                    v_glob,
-                    u_glob,
-                    idx_t,
-                    idx_r
-                ] = True
+                pos_mask[v_glob,u_glob,idx_t,idx_r] = True
 
                 # regression target
 
-                anchor = anchors[
-                    v_glob,
-                    u_glob,
-                    idx_t,
-                    idx_r
-                ].unsqueeze(0)
+                anchor = anchors[v_glob,u_glob,idx_t,idx_r].unsqueeze(0)
 
-                encoded = encode_targets(
-                    anchor,
-                    gt.unsqueeze(0)
-                ).squeeze(0)
+                encoded = encode_targets(anchor,gt.unsqueeze(0)).squeeze(0)
 
-                reg_targets[
-                    v_glob,
-                    u_glob,
-                    idx_t,
-                    idx_r
-                ] = encoded
+                reg_targets[v_glob,u_glob,idx_t,idx_r] = encoded
+                
         return labels, reg_targets, pos_mask
     
 
@@ -357,18 +246,20 @@ class TargetAssigner:
 def encode_targets(anchors, gt_boxes):
     """Use anchors and gt boxes to create the 8 targets--> (dx, dy, dz, dw, dl, dh, dsin(theta), dcos(theta))"""
     diagonal = torch.sqrt(anchors[:, 3]**2 + anchors[:, 4]**2)
-    
+    """Anchors are fix and targets are rotating rectangles. When rotating, the relatives offset of 
+    x and y change depending on the object orientation. But the Diagonal (or
+    in math the norm=sqrt(w²+l²)) of the anchor is invariant"""
     deltas_x = (gt_boxes[:, 0] - anchors[:, 0]) / diagonal
     deltas_y = (gt_boxes[:, 1] - anchors[:, 1]) / diagonal
     deltas_z = (gt_boxes[:, 2] - anchors[:, 2]) / anchors[:, 5]
     
-    # Normalisation 0 to 1
+    # Normalisation 0 to 1  
     deltas_w = torch.log(gt_boxes[:, 3] / anchors[:, 3])
     deltas_l = torch.log(gt_boxes[:, 4] / anchors[:, 4])
     deltas_h = torch.log(gt_boxes[:, 5] / anchors[:, 5])
     
 
-    # Au lieu d'un delta linéaire, on prédit le sinus et le cosinus de la différence
+    # Using sin and cosin
     angle_diff = gt_boxes[:, 6] - anchors[:, 6]
     deltas_sin = torch.sin(angle_diff)
     deltas_cos = torch.cos(angle_diff)
