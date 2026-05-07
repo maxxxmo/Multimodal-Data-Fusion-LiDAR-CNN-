@@ -231,6 +231,7 @@ Instead of computing the exact intersection between two rotated rectangles, I ap
 ![https://madmann91.github.io/2024/02/10/converting-oriented-bounding-boxes-to-axis-aligned-ones.html](image-7.png)
 
 This projection estimates how much space the rotated rectangle occupies along the x and y axes:
+
 $$
 \begin{aligned}
 l_{eff} &= l|\cos(\Delta\theta)| + w|\sin(\Delta\theta)| \\
@@ -239,6 +240,7 @@ w_{eff} &= l|\sin(\Delta\theta)| + w|\cos(\Delta\theta)|
 $$
 
 Then, the overlap is computed independently on each axis:
+
 $$
 \begin{aligned}
 \text{overlap}_x &= \max\left(\frac{l_{eff} + l_g}{2} - |x_a - x_g|, 0\right) \\
@@ -247,6 +249,7 @@ $$
 $$
 
 and the intersection area is approximated as:
+
 $$
 \text{inter\_area} = \text{overlap}_x \times \text{overlap}_y
 $$
