@@ -80,7 +80,7 @@ class KittiPillarDataset(Dataset):
 
         H, W = grid_size
 
-        # 1. FILTER POINTS
+        # Filter point inside pc_range
 
         mask = (
             (points[:, 0] >= pc_range[0]) & (points[:, 0] < pc_range[3]) &
@@ -88,12 +88,12 @@ class KittiPillarDataset(Dataset):
         )
         points = points[mask]
 
-        # 2. RESOLUTION
+        # Resolution calculus
 
         res_x = (pc_range[3] - pc_range[0]) / W
         res_y = (pc_range[4] - pc_range[1]) / H
 
-        # 3. GRID INDEXING (IMPORTANT: u=W, v=H)
+        # 3. GRID INDEXING (u=W, v=H)
 
         u = np.clip(((points[:, 0] - pc_range[0]) / res_x).astype(np.int32), 0, W - 1)
         v = np.clip(((points[:, 1] - pc_range[1]) / res_y).astype(np.int32), 0, H - 1)
@@ -103,7 +103,7 @@ class KittiPillarDataset(Dataset):
         pseudo_image = np.zeros((3, H, W), dtype=np.float32)
         count_map = np.zeros((H, W), dtype=np.float32)
 
-        # 5. FILLING
+        # Filling the bev map
 
         for i in range(len(points)):
             uu = u[i]
@@ -112,31 +112,27 @@ class KittiPillarDataset(Dataset):
             z = points[i, 2]
             intensity = points[i, 3]
 
-            # max height
+            # Keeping higher point of the column
             if z > pseudo_image[0, vv, uu]:
                 pseudo_image[0, vv, uu] = z
-
+            # keeping density and intensity
             pseudo_image[1, vv, uu] += 1.0
             pseudo_image[2, vv, uu] += intensity
             count_map[vv, uu] += 1
 
-        # 6. NORMALIZATION
+        # normalization
 
         mask_non_empty = count_map > 0
 
-        # --- HEIGHT (centré sol ~ -1.6m)
-        pseudo_image[0, mask_non_empty] = (
-            (pseudo_image[0, mask_non_empty] + 1.6) / 0.5
-        )
+        # height --> point on the ground is now 0
+        pseudo_image[0, mask_non_empty] = ((pseudo_image[0, mask_non_empty] + 1.6) / 0.5)
 
-        # --- DENSITY (log scale)
+        # Density --> compress values
         pseudo_image[1] = np.log1p(pseudo_image[1])
 
-        # --- INTENSITY (robust mean + tanh)
+        # Intensity --> decrease values
         pseudo_image[2, mask_non_empty] /= count_map[mask_non_empty]
-        pseudo_image[2, mask_non_empty] = np.tanh(
-            pseudo_image[2, mask_non_empty] / 10.0
-        )
+        pseudo_image[2, mask_non_empty] = np.tanh(pseudo_image[2, mask_non_empty] / 10.0)
         
         return np.nan_to_num(pseudo_image)
 
