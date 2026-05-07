@@ -91,6 +91,8 @@ This class purpose is to do the calibration.
 
 ## 2.3 Cloud Points Display
 
+TO DO!!!! Complete 03d explanation from display
+
 # 3 Late fusion approach
 Late fusion is when each modality create a prediction of features or decision and those are grouped and use to make a final decision.
 
@@ -132,6 +134,10 @@ There are 3 important methods:
 - load_label() &rarr;
 - transform_to_pillar &rarr;
 - get_item() &rarr;
+
+
+***hdf5 files*** TO DO!!!!!
+
 
 ### 3.2.3 Model & Loss - Iteration 1
 Then my first model pillarbackbone was like this:
@@ -217,10 +223,44 @@ So i Have 2 classes:
 
 And functions:
 - calculate_iou_bev --> calculate overlaping between boxes in BEV view. IoU = Area(Intersection) / Area(Union)
-- encode_target --> Transform meters coordinates to relatives in deltas (CITE THETA COS AND SIN)
+- encode_target --> Transform meters coordinates to relatives in deltas (PointPillars article)
 
-Note: I use AABB and not OBB
-![https://madmann91.github.io/2024/02/10/converting-oriented-bounding-boxes-to-axis-aligned-ones.html](image-6.png)
+Note: I use an AABB approximation (Yu Zheng) by projecting the oriented bounding box onto the x/y axes for the intersection computation.
+Instead of computing the exact intersection between two rotated rectangles, I approximate the oriented box with its axis-aligned bounding box (AABB).
+
+![https://madmann91.github.io/2024/02/10/converting-oriented-bounding-boxes-to-axis-aligned-ones.html](image-7.png)
+
+This projection estimates how much space the rotated rectangle occupies along the x and y axes:
+$$
+\begin{aligned}
+l_{eff} &= l|\cos(\Delta\theta)| + w|\sin(\Delta\theta)| \\
+w_{eff} &= l|\sin(\Delta\theta)| + w|\cos(\Delta\theta)|
+\end{aligned}
+$$
+
+Then, the overlap is computed independently on each axis:
+$$
+\begin{aligned}
+\text{overlap}_x &= \max\left(\frac{l_{eff} + l_g}{2} - |x_a - x_g|, 0\right) \\
+\text{overlap}_y &= \max\left(\frac{w_{eff} + w_g}{2} - |y_a - y_g|, 0\right)
+\end{aligned}
+$$
+
+and the intersection area is approximated as:
+$$
+\text{inter\_area} = \text{overlap}_x \times \text{overlap}_y
+$$
+
+
+So the computed IoU is an approximation of the true rotated IoU.
+Because the projected AABB generally occupies more area than the real oriented rectangle and especially for large rotations (around 45°).
+
+However, this approximation is still efficient because:
+
+- Faster than polygon intersection calculus (Sutherland-Hodgman)
+- GPU compatible (no conditions, easy calculus (multiplications))
+- used for matching anchors and GT, not for creating the regs
+
 
 After a loss modification and a realisation of dimensions missmatch that was breaking everything (w,h) instead of (h,w). Ialso had a mask initialisation issue in generate anchor. Because the pillar dataset is in W,h instead of H, W!!!
 My model starts to learn losses are decreasing and precision improves. But the recall stay low even if when eye tested everything look normal.
@@ -231,7 +271,7 @@ It's due to the fact that there are prediction in the good zone but they are not
 
 
 
-Before that I need to make the angle prediction. Using only theta it is oftenly off. So i use sin and cos. ***(CITE)***
+Before that I need to make the angle prediction. Using only theta it is oftenly off. So i use sin and cos. (PointPillars article)
 
 ![alt text](image-2.png)
 Cars are 90° wrong????? whyyyyyy
@@ -299,26 +339,32 @@ We use two concept:
 
 
 # 5 Sources
-- [KITTI Coordinate Transformations](https://medium.com/data-science/kitti-coordinate-transformations-125094cd42fb)
-- [Vision meets Robotics: The KITTI Dataset](https://www.cvlibs.net/publications/Geiger2013IJRR.pdf)
-- [Camera-Lidar Projection: Navigating between 2D and 3D](https://medium.com/swlh/camera-lidar-projection-navigating-between-2d-and-3d-911c78167a94)
-- [open library for LiDAR detection](https://github.com/open-mmlab/OpenPCDet?tab=readme-ov-file)
-- [Bird Eye View](https://medium.com/@nikitamalviya/birds-eye-view-a-new-perspective-20323ee06fdf)
-- [ late fusion medium](https://medium.com/@raj.pulapakura/multimodal-models-and-fusion-a-complete-guide-225ca91f6861#ea9c)
-- [anchors?](https://arxiv.org/pdf/2211.06108)
-- [Anchor explanation](https://www.ultralytics.com/glossary/anchor-based-detectors)
-- [PointPillars: Fast Encoders for Object Detection from Point Clouds](https://arxiv.org/pdf/1812.05784)
-- [matching by IOU](https://pyimagesearch.com/2016/11/07/intersection-over-union-iou-for-object-detection/)
-- [torchvision operators](https://docs.pytorch.org/vision/main/ops.html)
-- [convolutions types explanation](https://medium.com/codex/7-different-convolutions-for-designing-cnns-that-will-level-up-your-computer-vision-project-fec588113a64)
-- >@article{Zhou2018,
-   author  = {Qian-Yi Zhou and Jaesik Park and Vladlen Koltun},
-   title   = {{Open3D}: {A} Modern Library for {3D} Data Processing},
-   journal = {arXiv:1801.09847},
-   year    = {2018},
-}
-- [u-net](https://arxiv.org/pdf/1505.04597)
->
+***Dataset & Coordinate Systems***
+* [Vision meets Robotics: The KITTI Dataset](https://www.cvlibs.net/publications/Geiger2013IJRR.pdf)
+* [KITTI Coordinate Transformations](https://medium.com/data-science/kitti-coordinate-transformations-125094cd42fb)
+* [Camera-Lidar Projection: Navigating between 2D and 3D](https://medium.com/swlh/camera-lidar-projection-navigating-between-2d-and-3d-911c78167a94)
+
+***Point Cloud Encoding & Representation***
+* [PointPillars: Fast Encoders for Object Detection from Point Clouds](https://arxiv.org/pdf/1812.05784)
+* [Bird Eye View](https://medium.com/@nikitamalviya/birds-eye-view-a-new-perspective-20323ee06fdf)
+
+***Model Architecture & Convolutions***
+* [u-net](https://arxiv.org/pdf/1505.04597)
+* [convolutions types explanation](https://medium.com/codex/7-different-convolutions-for-designing-cnns-that-will-level-up-your-computer-vision-project-fec588113a64)
+* [ late fusion medium](https://medium.com/@raj.pulapakura/multimodal-models-and-fusion-a-complete-guide-225ca91f6861#ea9c)
+
+***Anchors & Detection Head***
+* [Anchor explanation](https://www.ultralytics.com/glossary/anchor-based-detectors)
+* [anchors?](https://arxiv.org/pdf/2211.06108)
+
+***Metrics & Evaluation***
+* [matching by IOU](https://pyimagesearch.com/2016/11/07/intersection-over-union-iou-for-object-detection/)
+* [Polygone IoU approximation](https://www.ecva.net/papers/eccv_2020/papers_ECCV/papers/123650460.pdf)
+
+***Frameworks & Libraries***
+* [open library for LiDAR detection](https://github.com/open-mmlab/OpenPCDet?tab=readme-ov-file)
+* [Open3D: A Modern Library for 3D Data Processing](https://arxiv.org/abs/1801.09847)
+* [torchvision operators](https://docs.pytorch.org/vision/main/ops.html)
 
 
 

@@ -86,23 +86,9 @@ class TargetAssigner:
         H, W, N_t, N_r, _ = anchors.shape
         device = anchors.device
 
-        labels = torch.zeros(
-            (H, W, N_t, N_r),
-            dtype=torch.float32,
-            device=device
-        )
-
-        pos_mask = torch.zeros(
-            (H, W, N_t, N_r),
-            dtype=torch.bool,
-            device=device
-        )
-
-        reg_targets = torch.zeros(
-            (H, W, N_t, N_r, 8),
-            dtype=torch.float32,
-            device=device
-        )
+        labels = torch.zeros((H, W, N_t, N_r),dtype=torch.float32,device=device)
+        pos_mask = torch.zeros((H, W, N_t, N_r),dtype=torch.bool,device=device)
+        reg_targets = torch.zeros((H, W, N_t, N_r, 8),dtype=torch.float32,device=device)
 
         # GRID RESOLUTION
         res_x = (self.pc_range[3] - self.pc_range[0]) / W
@@ -208,14 +194,17 @@ class TargetAssigner:
         device = anchors.device
         N, M = anchors.shape[0], gt.shape[0]
         
-        # Parameters
+        # Parameters of GTs and Anchors
         a_x, a_y, a_w, a_l, a_theta = anchors[:, 0], anchors[:, 1], anchors[:, 3], anchors[:, 4], anchors[:, 6]
         g_x, g_y, g_w, g_l, g_theta = gt[:, 0], gt[:, 1], gt[:, 3], gt[:, 4], gt[:, 6]
 
         iou_matrix = torch.zeros((N, M), device=device)
 
-        for j in range(M):
-            # Projecting angle using sin and cos
+        for j in range(M): # Each GT is comparated to all anchors
+            
+            # Intercetion Area
+            
+            # Projecting angle using sin and cos to get rotation difference
             delta_theta = a_theta - g_theta[j]
             cos_rel = torch.abs(torch.cos(delta_theta))
             sin_rel = torch.abs(torch.sin(delta_theta))
@@ -234,11 +223,11 @@ class TargetAssigner:
             
             inter_area = inter_w * inter_h
             
-            # 5. Union et IoU
+            # Union Area 
             area_a = a_w * a_l
             area_g = g_w[j] * g_l[j]
             union_area = area_a + area_g - inter_area
-            
+            # IoU
             iou_matrix[:, j] = inter_area / (union_area + 1e-7)
 
         return iou_matrix
@@ -248,12 +237,14 @@ def encode_targets(anchors, gt_boxes):
     diagonal = torch.sqrt(anchors[:, 3]**2 + anchors[:, 4]**2)
     """Anchors are fix and targets are rotating rectangles. When rotating, the relatives offset of 
     x and y change depending on the object orientation. But the Diagonal (or
-    in math the norm=sqrt(w²+l²)) of the anchor is invariant"""
+    in math the norm=sqrt(w²+l²)) of the anchor is invariant
+    (From PointPillr article)"""
+    
     deltas_x = (gt_boxes[:, 0] - anchors[:, 0]) / diagonal
     deltas_y = (gt_boxes[:, 1] - anchors[:, 1]) / diagonal
     deltas_z = (gt_boxes[:, 2] - anchors[:, 2]) / anchors[:, 5]
     
-    # Normalisation 0 to 1  
+    # Normalisation 0 to 1  (from PointPillar article)
     deltas_w = torch.log(gt_boxes[:, 3] / anchors[:, 3])
     deltas_l = torch.log(gt_boxes[:, 4] / anchors[:, 4])
     deltas_h = torch.log(gt_boxes[:, 5] / anchors[:, 5])

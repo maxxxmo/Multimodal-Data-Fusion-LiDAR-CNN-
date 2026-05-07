@@ -35,11 +35,14 @@ class KittiPillarDataset(Dataset):
             print(f"❌ ERREUR : Chemin introuvable -> {self.lidar_path}")
             
     def __getstate__(self):
+        """Usefull for parallelization, so we can copy the h5 dataset on different threads of the CPU. 
+        (h55py cant share) an open folder this reset file state to none before copy so it doesnt crash"""
         state = self.__dict__.copy()
         state['h5_file'] = None
         return state
     
     def __len__(self):
+        """tell pytorch how many samples are available"""
         return len(self.file_list)
     
     def load_label(self, file_id, calib):
@@ -54,7 +57,7 @@ class KittiPillarDataset(Dataset):
                 if p[0] == 'DontCare': continue
                 h, w, l = float(p[8]), float(p[9]), float(p[10])
                 loc_cam = np.array([[float(p[11]), float(p[12]), float(p[13])]])
-                ry = float(p[14]) # camera rotation around Y-axis (vertical axis)
+                ry = float(p[14]) # camera rotation
                 loc_lidar = calib.project_rect_to_velo(loc_cam).flatten() # Cam to LiDAR
                 loc_lidar[2] += h / 2 # BBOX correction, in LiDAR we use the center of the box
                 yaw_lidar = -ry - np.pi / 2 # angle of the object corrected for LiDAR coordinates
@@ -65,10 +68,11 @@ class KittiPillarDataset(Dataset):
 
     def transform_to_pillars(self, points):
         """
-        BEV Pillar encoding cohérent (C, H, W)
+        Transofrm 3d points to  BEV PointPillar (C, H, W)
 
-        - H = axe Y (vertical image)
-        - W = axe X (horizontal image)
+        - H = axe Y 
+        - W = axe X 
+        
         """
 
         pc_range = self.dataset_config['pc_range']
@@ -76,9 +80,7 @@ class KittiPillarDataset(Dataset):
 
         H, W = grid_size
 
-        # =====================================================
         # 1. FILTER POINTS
-        # =====================================================
 
         mask = (
             (points[:, 0] >= pc_range[0]) & (points[:, 0] < pc_range[3]) &
@@ -86,30 +88,22 @@ class KittiPillarDataset(Dataset):
         )
         points = points[mask]
 
-        # =====================================================
         # 2. RESOLUTION
-        # =====================================================
 
         res_x = (pc_range[3] - pc_range[0]) / W
         res_y = (pc_range[4] - pc_range[1]) / H
 
-        # =====================================================
         # 3. GRID INDEXING (IMPORTANT: u=W, v=H)
-        # =====================================================
 
         u = np.clip(((points[:, 0] - pc_range[0]) / res_x).astype(np.int32), 0, W - 1)
         v = np.clip(((points[:, 1] - pc_range[1]) / res_y).astype(np.int32), 0, H - 1)
 
-        # =====================================================
         # 4. BEV MAP (C, H, W)
-        # =====================================================
 
         pseudo_image = np.zeros((3, H, W), dtype=np.float32)
         count_map = np.zeros((H, W), dtype=np.float32)
 
-        # =====================================================
         # 5. FILLING
-        # =====================================================
 
         for i in range(len(points)):
             uu = u[i]
@@ -126,9 +120,7 @@ class KittiPillarDataset(Dataset):
             pseudo_image[2, vv, uu] += intensity
             count_map[vv, uu] += 1
 
-        # =====================================================
         # 6. NORMALIZATION
-        # =====================================================
 
         mask_non_empty = count_map > 0
 
@@ -145,86 +137,19 @@ class KittiPillarDataset(Dataset):
         pseudo_image[2, mask_non_empty] = np.tanh(
             pseudo_image[2, mask_non_empty] / 10.0
         )
-
-        # =====================================================
-        # 7. SAFETY
-        # =====================================================
-
+        
         return np.nan_to_num(pseudo_image)
 
 
-
-
-
-
-
-    # def transform_to_pillars(self, points):
-    #     """
-    #     Version finalisée : 
-    #     - Z-Score pour la hauteur (centré sur le sol à -1.6m).
-    #     - Log-scale pour la densité (nombre de points).
-    #     - Tanh pour l'intensité (reflet non-linéaire).
-    #     """
-    #     pc_range = self.dataset_config['pc_range'] 
-    #     grid_size = self.dataset_config['grid_size'] 
-
-    #     # 1. Filtrage spatial
-    #     mask = ((points[:, 0] >= pc_range[0]) & (points[:, 0] < pc_range[3]) &
-    #             (points[:, 1] >= pc_range[1]) & (points[:, 1] < pc_range[4]))
-    #     points = points[mask]
-
-    #     res_x = (pc_range[3] - pc_range[0]) / grid_size[0]
-    #     res_y = (pc_range[4] - pc_range[1]) / grid_size[1]
-
-    #     u = np.clip(((points[:, 0] - pc_range[0]) / res_x).astype(np.int32), 0, grid_size[0] - 1)
-    #     v = np.clip(((points[:, 1] - pc_range[1]) / res_y).astype(np.int32), 0, grid_size[1] - 1)
-
-    #     # 2. Création des maps
-    #     pseudo_image = np.zeros((3, grid_size[1], grid_size[0]), dtype=np.float32)
-    #     count_map = np.zeros((grid_size[1], grid_size[0]), dtype=np.float32)
-
-    #     # 3. Remplissage
-    #     # Optimisation : on garde le Z max par pilier
-    #     for i in range(len(points)):
-    #         curr_u, curr_v = u[i], v[i]
-    #         z, intensity = points[i, 2], points[i, 3]
-
-    #         if z > pseudo_image[0, curr_v, curr_u]:
-    #             pseudo_image[0, curr_v, curr_u] = z
-            
-    #         pseudo_image[1, curr_v, curr_u] += 1.0 
-    #         pseudo_image[2, curr_v, curr_u] += intensity
-    #         count_map[curr_v, curr_u] += 1
-
-    #     # 4. Normalisation robuste
-    #     mask_non_empty = count_map > 0
-        
-    #     # Canal 0 (Z) : Z-Score (Centré sur le sol KITTI ~ -1.6m, STD ~ 0.5)
-    #     # Cela permet d'avoir des valeurs centrées autour de 0, idéal pour les CNN
-    #     pseudo_image[0, mask_non_empty] = (pseudo_image[0, mask_non_empty] + 1.6) / 0.5
-        
-    #     # Canal 1 (Nombre de points) : Log-échelle (plus stable que linéaire)
-    #     pseudo_image[1] = np.log1p(pseudo_image[1])
-        
-    #     # Canal 2 (Intensité) : Moyenne normalisée via Tanh
-    #     # Le / 255.0 est souvent trop brutal pour du LiDAR. 
-    #     # La division par 10 + tanh permet de garder la sensibilité aux faibles réflectances
-    #     pseudo_image[2, mask_non_empty] /= count_map[mask_non_empty]
-    #     pseudo_image[2, mask_non_empty] = np.tanh(pseudo_image[2, mask_non_empty] / 10.0)
-
-    #     # Sécurité finale : aucune valeur infinie ou NaN
-    #     return np.nan_to_num(pseudo_image)
-    
     def __getitem__(self, idx):
+        """The dataloader call this function to load Data, needs to be fast"""
+        
         if self.h5_file is None:
-            self.h5_file = h5py.File(self.h5_path, 'r') # Pointant sur le fichier unifié
+            self.h5_file = h5py.File(self.h5_path, 'r') 
             
         file_id = str(self.file_list[idx])
         group = self.h5_file[file_id]
         
-        
-        
-        # Tout est lu au même endroit
         return {
             'id': file_id,
             'inputs': torch.from_numpy(group['pseudo_image'][:]).float(),

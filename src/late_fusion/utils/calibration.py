@@ -26,10 +26,10 @@ def read_calib_file(filepath):
         
 class KittiCalibration:
     def __init__(self, calib_path):
-        self.calib_file = str(calib_path) # Pour le debug dans load_label
-        
+        self.calib_file = str(calib_path)
+        # For 2 different dataset types
         if os.path.isdir(calib_path):
-            # Format KITTI RAW (plusieurs fichiers)
+            # Format KITTI RAW 
             cam_to_cam = read_calib_file(os.path.join(calib_path, "calib_cam_to_cam.txt"))
             velo_to_cam = read_calib_file(os.path.join(calib_path, "calib_velo_to_cam.txt"))
             
@@ -37,7 +37,7 @@ class KittiCalibration:
             r_rect_data = cam_to_cam['R_rect_00']
             p_rect_data = cam_to_cam['P_rect_02']
         else:
-            # Format Objet/YOLO (un seul fichier .txt)
+            # Format Objet/YOLO 
             calib_data = read_calib_file(calib_path)
             
             # Utilisation de .get() pour gérer les variantes de noms (P2 vs P_rect_02, etc.)
