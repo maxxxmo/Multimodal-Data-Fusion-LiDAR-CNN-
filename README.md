@@ -251,11 +251,8 @@ $$
 and the intersection area is approximated as:
 
 $$
-\begin{aligned}
 \text{inter\_area} = \text{overlap}_x \times \text{overlap}_y
-\end{aligned}
 $$
-
 
 So the computed IoU is an approximation of the true rotated IoU.
 Because the projected AABB generally occupies more area than the real oriented rectangle and especially for large rotations (around 45°).
