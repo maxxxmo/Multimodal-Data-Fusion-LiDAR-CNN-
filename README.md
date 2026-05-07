@@ -145,7 +145,12 @@ There are 3 important methods:
 - get_item() &rarr;
 
 
-***hdf5 files*** TO DO!!!!!
+We can print our pseudo-image created with transform_to_pillar and show labels on it:
+
+![BEV print](images/bev_print.png)
+
+
+*Note:* ***hdf5 files*** TO DO!!!!!
 
 
 ### 3.2.3 Model & Loss - Iteration 1
@@ -333,6 +338,9 @@ We use two concept:
 - Focal loss: reduce the impact of easy examples
 
 - Hard negative sampling: We dont take all the negatives samples, we take those the model are not good on. So in the end we only keep positives and part of the negatives.
+
+### 3.3.8 Final model performance 
+![results lidar](images/results_lidar.png)
 
 ## 3.3 NMS (Non Maxmimum Supression)
 
