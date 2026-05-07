@@ -251,7 +251,7 @@ $$
 and the intersection area is approximated as:
 
 $$
-\text{inter\_area} = \text{overlap}_x \times \text{overlap}_y
+\text{inter}_{\text{area}} = \text{overlap}_x \times \text{overlap}_y
 $$
 
 So the computed IoU is an approximation of the true rotated IoU.
