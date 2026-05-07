@@ -351,6 +351,7 @@ Boxes are ranked by descending confidence score. Starting from the best BBOX we 
 
 (Pytorch already has an implementation)
 
+![NMS_result](images/NMS_result.png)
 ## 3.4 Fusion
 
 
