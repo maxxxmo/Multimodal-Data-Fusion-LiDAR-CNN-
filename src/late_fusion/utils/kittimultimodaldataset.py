@@ -6,6 +6,8 @@ import h5py
 import numpy as np
 from PIL import Image
 import torchvision.transforms as T
+from src.late_fusion.utils.calibration import KittiCalibration
+
 
 class KittiMultiModalDataset(Dataset):
     """
@@ -65,37 +67,6 @@ class KittiMultiModalDataset(Dataset):
         state = self.__dict__.copy()
         state['h5_file'] = None
         return state
-    
-    def load_calib(self, file_id):
-        calib_file = self.calib_path / f"{file_id}.txt"
-        if not calib_file.exists():
-            return {
-                'P2': torch.eye(4)[:3, :],
-                'R0_rect': torch.eye(4),
-                'Tr_velo_to_cam': torch.eye(4)
-            }
-        calib_data = {}
-        with open(calib_file, 'r') as f:
-            for line in f.readlines():
-                if not line.strip(): continue
-                parts = line.split(':')
-                if len(parts) < 2: continue
-                key = parts[0].strip()
-                value = np.fromstring(parts[1], sep=' ')
-                calib_data[key] = value
-
-        P2 = calib_data['P2'].reshape(3, 4)                  
-        R0_rect = calib_data['R0_rect'].reshape(3, 3)        
-        Tr_velo_to_cam = calib_data['Tr_velo_to_cam'].reshape(3, 4) 
-        Tr_velo_to_cam_h = np.vstack([Tr_velo_to_cam, [0, 0, 0, 1]])
-        R0_rect_h = np.eye(4)
-        R0_rect_h[:3, :3] = R0_rect
-
-        return {
-            'P2': torch.from_numpy(P2).float(),
-            'R0_rect': torch.from_numpy(R0_rect_h).float(),
-            'Tr_velo_to_cam': torch.from_numpy(Tr_velo_to_cam_h).float()
-        }
 
 
 
@@ -136,14 +107,19 @@ class KittiMultiModalDataset(Dataset):
             
         # targets
         yolo_labels = self.load_yolo_label(file_id)
-        
-        calib_matrices = self.load_calib(file_id)
+
+
+        calib_file = self.calib_path / f"{file_id}.txt"
+        if calib_file.exists():
+            calib_obj = KittiCalibration(calib_file)
+        else:
+            calib_obj = None
         
         return {
             'id': file_id,
             'lidar_inputs': lidar_inputs,
             'camera_inputs': img_tensor,
-            'calib': calib_matrices,
+            'calib': calib_obj,
             'lidar_targets': {
                 'cls': torch.from_numpy(group['targets_cls'][:]).float(),
                 'reg': torch.from_numpy(group['targets_reg'][:]).float(),
