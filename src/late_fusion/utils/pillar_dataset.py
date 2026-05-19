@@ -8,6 +8,10 @@ import h5py
 
 
 class KittiPillarDataset(Dataset):
+    """This class is responsible for loading and preprocessing the KITTI dataset for the PointPillar model.
+    It reads LiDAR point clouds, transforms them into a pseudo-image format suitable for BEV (Bird's Eye View)
+    detection, and loads corresponding labels"""
+    
     def __init__(self, data_dir="./data/kitti_lidar", config_path= "./src/late_fusion/LiDAR/config.yaml", split='train', anchor_gen=None, target_assigner=None):
         self.anchor_gen = anchor_gen
         self.target_assigner = target_assigner
