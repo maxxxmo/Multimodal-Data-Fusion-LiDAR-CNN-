@@ -19,13 +19,13 @@ class KittiMultiModalDataset(Dataset):
                  split='train', 
                  anchor_gen=None, 
                  target_assigner=None,
-                 img_size=(640, 640)): # Taille standard pour un CNN/YOLO
+                 img_size=(640, 640)): 
         
         self.anchor_gen = anchor_gen
         self.target_assigner = target_assigner
         self.img_size = img_size
         
-        # Configuration LiDAR
+        #  LiDAR Configuration
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         self.dataset_config = self.config['dataset']
@@ -34,23 +34,22 @@ class KittiMultiModalDataset(Dataset):
         self.base_path = self.root_dir / split    
         self.lidar_path = self.base_path / "velodyne"
         
-        # Configuration YOLO (Caméra)
+        # Camera configuration
         self.yolo_base_path = Path(yolo_dir).resolve() / split
         self.yolo_img_path = self.yolo_base_path / "images"
         self.yolo_label_path = self.yolo_base_path / "labels"
         
-        # Le H5 reste notre source LiDAR principale en train/val
+        # H5 file for pseudo image
         self.h5_path = self.base_path / "h_data" / "dataset_unified.h5"
         self.h5_file = None
         
-        # Pipeline de transformation basique pour l'image (CNN)
+        
         self.img_transforms = T.Compose([
             T.Resize(self.img_size),
             T.ToTensor(), # Convertit en [C, H, W] et scale entre 0.0 et 1.0
-            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) # ImageNet defaults
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) 
         ])
 
-        # Initialisation de la liste des fichiers (basée sur le LiDAR pour assurer la correspondance)
         if self.lidar_path.exists():
             self.file_list = sorted([f.stem for f in self.lidar_path.glob("*.bin")])
             print(f"✅ {len(self.file_list)} samples multimodaux trouvés.")
@@ -59,6 +58,7 @@ class KittiMultiModalDataset(Dataset):
             print(f"❌ ERREUR : Chemin LiDAR introuvable -> {self.lidar_path}")
 
     def __getstate__(self):
+        # for parallelisation 
         state = self.__dict__.copy()
         state['h5_file'] = None
         return state
@@ -67,19 +67,18 @@ class KittiMultiModalDataset(Dataset):
         return len(self.file_list)
 
     def load_yolo_label(self, file_id):
-        """Charge les labels YOLO textuels [class, x, y, w, h] normalized"""
+        """load  labels  [class, x, y, w, h] normalized"""
         label_file = self.yolo_label_path / f"{file_id}.txt"
         if not label_file.exists():
             return np.array([], dtype=np.float32)
         
-        # On utilise loadtxt pour lire le fichier d'annotations YOLO
         try:
             labels = np.loadtxt(label_file, dtype=np.float32)
-            if labels.ndim == 1: # S'il n'y a qu'un seul objet dans l'image
+            if labels.ndim == 1: 
                 labels = np.expand_dims(labels, axis=0)
             return labels
         except Exception:
-            return np.array([], dtype=np.float32) # Fichier vide / corrompu
+            return np.array([], dtype=np.float32)
 
     def __getitem__(self, idx):
         if self.h5_file is None:
@@ -88,20 +87,18 @@ class KittiMultiModalDataset(Dataset):
         file_id = str(self.file_list[idx])
         group = self.h5_file[file_id]
         
-        # 1. Chargement de la partie LiDAR (Pseudo-image)
+        # LiDAR pseudo image
         lidar_inputs = torch.from_numpy(group['pseudo_image'][:]).float()
         
-        # 2. Chargement de la partie Image (CNN)
-        # On assume l'extension .jpg, à adapter si c'est du .png
+        # image
         img_file = self.yolo_img_path / f"{file_id}.jpg"
         if img_file.exists():
             img = Image.open(img_file).convert('RGB')
             img_tensor = self.img_transforms(img)
         else:
-            # Fallback en production s'il manque une image : tenseur de zéros
             img_tensor = torch.zeros((3, self.img_size[0], self.img_size[1]), dtype=torch.float32)
             
-        # 3. Chargement des cibles YOLO
+        # targets
         yolo_labels = self.load_yolo_label(file_id)
         
         return {
